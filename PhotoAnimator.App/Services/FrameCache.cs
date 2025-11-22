@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using PhotoAnimator.App.Models;
 
@@ -269,7 +270,7 @@ namespace PhotoAnimator.App.Services
                 bitmap = await fm.GetBitmapAsync(ct).ConfigureAwait(false);
             }
 
-            return bitmap;
+            return bitmap != null ? EnforceMaxCacheSize(bitmap) : null;
         }
 
         private static void ReportProgress(ref int decodedCount, IProgress<int>? progress)
@@ -315,6 +316,31 @@ namespace PhotoAnimator.App.Services
         {
             public (int? targetWidth, int? targetHeight) GetTargetPixelsForViewport(int viewportWidth, int viewportHeight, int originalWidth, int originalHeight)
                 => (null, null);
+        }
+
+        private static BitmapSource EnforceMaxCacheSize(BitmapSource bitmap)
+        {
+            if (bitmap.PixelWidth <= FallbackViewportWidth && bitmap.PixelHeight <= FallbackViewportHeight)
+            {
+                return bitmap;
+            }
+
+            double scale = Math.Min(
+                (double)FallbackViewportWidth / bitmap.PixelWidth,
+                (double)FallbackViewportHeight / bitmap.PixelHeight);
+
+            if (scale >= 1.0)
+            {
+                return bitmap;
+            }
+
+            var transform = new ScaleTransform(scale, scale);
+            var resized = new TransformedBitmap(bitmap, transform);
+            if (resized.CanFreeze)
+            {
+                resized.Freeze();
+            }
+            return resized;
         }
     }
 }

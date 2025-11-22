@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,6 +40,14 @@ namespace PhotoAnimator.App.ViewModels
         private int _preloadTotal;
         private CancellationTokenSource? _loadCts;
         private int _frameCount;
+        private readonly IAppSettingsService _settingsService;
+        private readonly ObservableCollection<string> _recentFolders;
+        private bool _isTrayOpen = true;
+        private bool _isHelpVisible;
+        private long _droppedFrames;
+        private TimeSpan _elapsed = TimeSpan.Zero;
+        private string _elapsedDisplay = "00:00:00";
+        private long _lastAbsoluteFrameNumber;
 
         // Commands
         private readonly RelayCommand _playCommand;
@@ -55,15 +65,20 @@ namespace PhotoAnimator.App.ViewModels
             IImageDecodeService imageDecodeService,
             IFrameCache frameCache,
             IPlaybackController playbackController,
-            IConcurrencySettings concurrencySettings)
+            IConcurrencySettings concurrencySettings,
+            IAppSettingsService settingsService)
         {
             _folderScanner = folderScanner ?? throw new ArgumentNullException(nameof(folderScanner));
             _imageDecodeService = imageDecodeService ?? throw new ArgumentNullException(nameof(imageDecodeService));
             _frameCache = frameCache ?? throw new ArgumentNullException(nameof(frameCache));
             _playbackController = playbackController ?? throw new ArgumentNullException(nameof(playbackController));
             _concurrencySettings = concurrencySettings ?? throw new ArgumentNullException(nameof(concurrencySettings));
+            _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
 
             _frames = new ObservableCollection<FrameMetadata>();
+            _recentFolders = new ObservableCollection<string>(_settingsService.RecentFolders ?? Array.Empty<string>());
+            _isTrayOpen = _recentFolders.Count > 0;
+            UpdateElapsedDisplay(TimeSpan.Zero, 0, 0);
 
             // Initialize commands.
             _playCommand = new RelayCommand(Play, () => !_isPlaying && _frames.Count > 0 && !_isPreloading);
@@ -80,6 +95,77 @@ namespace PhotoAnimator.App.ViewModels
         public ObservableCollection<FrameMetadata> Frames => _frames;
 
         /// <summary>
+        /// Recently opened folders (most recent first).
+        /// </summary>
+        public ObservableCollection<string> RecentFolders => _recentFolders;
+
+        /// <summary>
+        /// True when the recent-folders tray is expanded.
+        /// </summary>
+        public bool IsTrayOpen
+        {
+            get => _isTrayOpen;
+            set
+            {
+                if (_isTrayOpen == value) return;
+                _isTrayOpen = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// Controls visibility of the help overlay.
+        /// </summary>
+        public bool IsHelpVisible
+        {
+            get => _isHelpVisible;
+            set
+            {
+                if (_isHelpVisible == value) return;
+                _isHelpVisible = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// Cumulative dropped frames for the current playback session.
+        /// </summary>
+        public long DroppedFrames
+        {
+            get => _droppedFrames;
+            private set
+            {
+                if (_droppedFrames == value) return;
+                _droppedFrames = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// Elapsed playback time display formatted as mm:ss:ff.
+        /// </summary>
+        public string ElapsedTimeDisplay
+        {
+            get => _elapsedDisplay;
+            private set
+            {
+                if (_elapsedDisplay == value) return;
+                _elapsedDisplay = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// True when user interaction should be enabled (disabled during preload).
+        /// </summary>
+        public bool IsInteractionEnabled => !_isPreloading;
+
+        /// <summary>
+        /// Last folder persisted in settings, used to seed the folder picker.
+        /// </summary>
+        public string? LastOpenedFolder => _settingsService.LastFolder;
+
+        /// <summary>
         /// Zero-based index of the current frame. Updated during playback and scrubbing.
         /// </summary>
         public int CurrentFrameIndex
@@ -90,11 +176,16 @@ namespace PhotoAnimator.App.ViewModels
                 if (_currentFrameIndex == value) return;
                 _currentFrameIndex = value;
                 OnPropertyChanged();
+                if (!_isPlaying && _selectedFps > 0)
+                {
+                    var elapsed = TimeSpan.FromSeconds(_currentFrameIndex / (double)_selectedFps);
+                    UpdateElapsedDisplay(elapsed, null, _currentFrameIndex);
+                }
             }
         }
 
         /// <summary>
-        /// Target frames-per-second for playback (6–24 inclusive). Changing this while playing
+        /// Target frames-per-second for playback (6-60 inclusive). Changing this while playing
         /// updates <see cref="IPlaybackController.FramesPerSecond"/> without restarting playback.
         /// </summary>
         public int SelectedFps
@@ -103,9 +194,10 @@ namespace PhotoAnimator.App.ViewModels
             set
             {
                 if (_selectedFps == value) return;
-                if (value < 6 || value > 24) throw new ArgumentOutOfRangeException(nameof(value), "FPS must be between 6 and 24.");
+                if (value < 6 || value > 60) throw new ArgumentOutOfRangeException(nameof(value), "FPS must be between 6 and 60.");
                 _selectedFps = value;
                 OnPropertyChanged();
+                UpdateElapsedDisplay(_elapsed, _lastAbsoluteFrameNumber, _currentFrameIndex);
                 if (IsPlaying)
                 {
                     _playbackController.FramesPerSecond = _selectedFps;
@@ -169,6 +261,7 @@ namespace PhotoAnimator.App.ViewModels
                 if (_isPreloading == value) return;
                 _isPreloading = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(IsInteractionEnabled));
                 RefreshCommandStates();
             }
         }
@@ -299,6 +392,7 @@ namespace PhotoAnimator.App.ViewModels
         private void Play()
         {
             if (_frames.Count == 0) return;
+            ResetPlaybackMetrics();
             _playbackController.FramesPerSecond = _selectedFps;
             _ = _playbackController.StartAsync(_frames, CancellationToken.None);
             IsPlaying = true;
@@ -319,6 +413,7 @@ namespace PhotoAnimator.App.ViewModels
         private void Rewind()
         {
             _playbackController.Rewind();
+            ResetPlaybackMetrics();
             CurrentFrameIndex = 0;
         }
 
@@ -361,6 +456,7 @@ namespace PhotoAnimator.App.ViewModels
             var ct = _loadCts.Token;
             bool resumePlayback = preservePlaybackState && _isPlaying;
             int desiredIndex = preservePlaybackState ? _currentFrameIndex : 0;
+            bool loadSucceeded = false;
 
             if (_isPlaying)
             {
@@ -374,6 +470,7 @@ namespace PhotoAnimator.App.ViewModels
                 PreloadTotal = 0;
                 FrameCount = 0;
                 CurrentFrameIndex = 0;
+                ResetPlaybackMetrics();
 
                 _frameCache.Clear();
                 _frames.Clear();
@@ -394,6 +491,7 @@ namespace PhotoAnimator.App.ViewModels
 
                 // Keep continuation on UI thread for property updates.
                 await _frameCache.PreloadAsync(scanned, null, null, progress, ct);
+                loadSucceeded = true;
             }
             catch (OperationCanceledException)
             {
@@ -414,11 +512,17 @@ namespace PhotoAnimator.App.ViewModels
             _playbackController.FrameChanged -= OnPlaybackFrameChanged;
             _playbackController.FrameChanged += OnPlaybackFrameChanged;
 
+            if (loadSucceeded && FolderPath != null)
+            {
+                _settingsService.RecordFolder(FolderPath);
+                SyncRecentFolders();
+            }
+
             if (!ct.IsCancellationRequested && _frames.Count > 0)
             {
                 int clampedIndex = Math.Clamp(desiredIndex, 0, _frames.Count - 1);
                 CurrentFrameIndex = clampedIndex;
-                if (resumePlayback)
+                if (resumePlayback || !preservePlaybackState)
                 {
                     Play();
                 }
@@ -430,12 +534,71 @@ namespace PhotoAnimator.App.ViewModels
         /// <summary>
         /// Updates <see cref="CurrentFrameIndex"/> when the playback controller signals a change.
         /// </summary>
-        private void OnPlaybackFrameChanged(object? sender, int index)
+        private void OnPlaybackFrameChanged(object? sender, FrameChangedEventArgs args)
         {
-            if (index != _currentFrameIndex)
+            DroppedFrames = args.DroppedTotal;
+            UpdateElapsedDisplay(args.Elapsed, args.AbsoluteFrameNumber, args.FrameIndex);
+
+            if (args.FrameIndex != _currentFrameIndex)
             {
-                CurrentFrameIndex = index;
+                CurrentFrameIndex = args.FrameIndex;
             }
+
+            if (!_playbackController.IsPlaying && IsPlaying)
+            {
+                IsPlaying = false;
+            }
+        }
+
+        private void UpdateElapsedDisplay(TimeSpan elapsed, long? absoluteFrameNumber, int? frameIndexOverride)
+        {
+            _elapsed = elapsed;
+            if (absoluteFrameNumber.HasValue)
+            {
+                _lastAbsoluteFrameNumber = absoluteFrameNumber.Value;
+            }
+            else if (frameIndexOverride.HasValue)
+            {
+                _lastAbsoluteFrameNumber = frameIndexOverride.Value;
+            }
+
+            int fps = Math.Max(1, _selectedFps);
+            int framesComponent;
+            if (absoluteFrameNumber.HasValue)
+            {
+                framesComponent = (int)(absoluteFrameNumber.Value % fps);
+            }
+            else if (frameIndexOverride.HasValue)
+            {
+                framesComponent = Math.Abs(frameIndexOverride.Value % fps);
+            }
+            else
+            {
+                framesComponent = (int)((elapsed.TotalSeconds * fps) % fps);
+            }
+
+            int minutes = (int)elapsed.TotalMinutes;
+            int seconds = elapsed.Seconds;
+            ElapsedTimeDisplay = $"{minutes:00}:{seconds:00}:{framesComponent:00}";
+        }
+
+        private void ResetPlaybackMetrics()
+        {
+            DroppedFrames = 0;
+            _lastAbsoluteFrameNumber = 0;
+            UpdateElapsedDisplay(TimeSpan.Zero, 0, _currentFrameIndex);
+        }
+
+        private void SyncRecentFolders()
+        {
+            _recentFolders.Clear();
+            foreach (var path in _settingsService.RecentFolders.Take(6))
+            {
+                _recentFolders.Add(path);
+            }
+            IsTrayOpen = _recentFolders.Count > 0;
+            OnPropertyChanged(nameof(RecentFolders));
+            OnPropertyChanged(nameof(LastOpenedFolder));
         }
 
         /// <summary>

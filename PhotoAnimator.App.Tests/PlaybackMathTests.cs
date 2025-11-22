@@ -30,4 +30,11 @@ public class PlaybackMathTests
         Assert.Equal(6, slowIndex);
         Assert.Equal(0, fastIndex);
     }
+
+    [Fact]
+    public void CalculateFrameIndex_AllowsHigherFps()
+    {
+        var index = PlaybackMath.CalculateFrameIndex(1.0, 60, 12); // 60 % 12 = 0
+        Assert.Equal(0, index);
+    }
 }

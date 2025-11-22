@@ -17,9 +17,9 @@ namespace PhotoAnimator.App.Services
     public interface IPlaybackController
     {
         /// <summary>
-        /// Raised when the current frame index changes. Supplies the new zero-based frame index.
+        /// Raised when the current frame index changes. Supplies the new zero-based frame index plus playback metrics.
         /// </summary>
-        event EventHandler<int>? FrameChanged;
+        event EventHandler<FrameChangedEventArgs>? FrameChanged;
 
         /// <summary>
         /// True while playback is active.
@@ -32,7 +32,7 @@ namespace PhotoAnimator.App.Services
         int CurrentFrameIndex { get; }
 
         /// <summary>
-        /// Target frames-per-second rate. Must be between 6 and 24 (inclusive).
+        /// Target frames-per-second rate. Must be between 6 and 60 (inclusive).
         /// Changing this while playing adjusts scheduling without restarting or rewinding.
         /// </summary>
         int FramesPerSecond { get; set; }

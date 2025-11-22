@@ -14,7 +14,7 @@ public static class PlaybackMath
     public static int CalculateFrameIndex(double elapsedSeconds, int fps, int frameCount)
     {
         if (frameCount <= 0) throw new ArgumentException("Frame count must be positive.", nameof(frameCount));
-        if (fps < 6 || fps > 24) throw new ArgumentOutOfRangeException(nameof(fps), "FPS must be between 6 and 24.");
+        if (fps < 6 || fps > 60) throw new ArgumentOutOfRangeException(nameof(fps), "FPS must be between 6 and 60.");
         if (elapsedSeconds < 0) elapsedSeconds = 0;
 
         double idealFrame = elapsedSeconds * fps;

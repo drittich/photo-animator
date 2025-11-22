@@ -24,7 +24,7 @@ public partial class MainWindow : Window
     private bool _isScrubbing;
     private CancellationTokenSource? _onDemandDecodeCts;
 
-    public int[] FpsOptions { get; } = new[] { 6, 8, 10, 12, 15, 18, 20, 24 };
+    public int[] FpsOptions { get; } = new[] { 6, 8, 10, 12, 15, 16, 18, 20, 24, 25, 30, 60 };
 
     public MainWindow()
         : this(
@@ -74,17 +74,17 @@ public partial class MainWindow : Window
         _onDemandDecodeCts?.Dispose();
     }
 
-    private void OnPlaybackFrameChanged(object? sender, int index)
+    private void OnPlaybackFrameChanged(object? sender, FrameChangedEventArgs args)
     {
-        if (index < 0) return;
-        _ = ShowFrameAsync(index, cancelPrevious: true);
+        if (args.FrameIndex < 0) return;
+        _ = ShowFrameAsync(args.FrameIndex, cancelPrevious: true);
     }
 
     private void OnOpenFolderClick(object sender, RoutedEventArgs e)
     {
         try
         {
-            var path = _folderDialogService.SelectFolder();
+            var path = _folderDialogService.SelectFolder(_viewModel.LastOpenedFolder);
             if (!string.IsNullOrWhiteSpace(path))
             {
                 _viewModel.OpenFolder(path);
@@ -132,6 +132,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnRecentFolderClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button button && button.Tag is string path && !string.IsNullOrWhiteSpace(path))
+        {
+            _viewModel.OpenFolder(path);
+        }
+    }
+
     private void ScrubSlider_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (_isScrubbing) return;
@@ -164,6 +172,16 @@ public partial class MainWindow : Window
             var play = _viewModel.PlayCommand;
             if (play.CanExecute(null)) play.Execute(null);
         }
+    }
+
+    private void OnHelpClick(object sender, RoutedEventArgs e)
+    {
+        _viewModel.IsHelpVisible = true;
+    }
+
+    private void OnCloseHelpClick(object sender, RoutedEventArgs e)
+    {
+        _viewModel.IsHelpVisible = false;
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -211,6 +229,11 @@ public partial class MainWindow : Window
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
+        if (!_viewModel.IsInteractionEnabled && e.Key is not Key.F1 && e.Key is not Key.Escape)
+        {
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.Space:
@@ -236,6 +259,17 @@ public partial class MainWindow : Window
                 {
                     var reload = _viewModel.ReloadCommand;
                     if (reload.CanExecute(null)) reload.Execute(null);
+                    e.Handled = true;
+                }
+                break;
+            case Key.F1:
+                _viewModel.IsHelpVisible = true;
+                e.Handled = true;
+                break;
+            case Key.Escape:
+                if (_viewModel.IsHelpVisible)
+                {
+                    _viewModel.IsHelpVisible = false;
                     e.Handled = true;
                 }
                 break;

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using WinForms = System.Windows.Forms;
 
 namespace PhotoAnimator.App.Services
@@ -11,8 +12,10 @@ namespace PhotoAnimator.App.Services
     /// </summary>
     public sealed class FolderDialogService : IFolderDialogService
     {
-        public string? SelectFolder()
+        public string? SelectFolder(string? initialDirectory = null)
         {
+            var startingDirectory = CoerceExistingDirectory(initialDirectory);
+
             // Attempt reflection-based use of CommonOpenFileDialog
             try
             {
@@ -26,6 +29,12 @@ namespace PhotoAnimator.App.Services
                     }
                     var isFolderPickerProp = type.GetProperty("IsFolderPicker");
                     isFolderPickerProp?.SetValue(dialogInstance, true);
+
+                    if (!string.IsNullOrWhiteSpace(startingDirectory))
+                    {
+                        type.GetProperty("InitialDirectory")?.SetValue(dialogInstance, startingDirectory);
+                        type.GetProperty("DefaultDirectory")?.SetValue(dialogInstance, startingDirectory);
+                    }
 
                     var showDialogMethod = type.GetMethod("ShowDialog");
                     var result = showDialogMethod?.Invoke(dialogInstance, null);
@@ -57,6 +66,10 @@ namespace PhotoAnimator.App.Services
                     UseDescriptionForTitle = true,
                     ShowNewFolderButton = false
                 };
+                if (!string.IsNullOrWhiteSpace(startingDirectory))
+                {
+                    dlg.SelectedPath = startingDirectory;
+                }
                 var result = dlg.ShowDialog();
                 if (result == WinForms.DialogResult.OK && !string.IsNullOrWhiteSpace(dlg.SelectedPath))
                 {
@@ -66,6 +79,34 @@ namespace PhotoAnimator.App.Services
             catch
             {
                 // Swallow; return null.
+            }
+
+            return null;
+        }
+
+        private static string? CoerceExistingDirectory(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                if (Directory.Exists(path))
+                {
+                    return path;
+                }
+
+                var parent = Path.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
+                {
+                    return parent;
+                }
+            }
+            catch
+            {
+                // ignore
             }
 
             return null;

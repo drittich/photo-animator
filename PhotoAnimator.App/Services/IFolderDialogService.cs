@@ -10,5 +10,6 @@ public interface IFolderDialogService
     /// <summary>
     /// Shows a folder selection dialog and returns the chosen absolute path, or null if the user cancelled.
     /// </summary>
-    string? SelectFolder();
+    /// <param name="initialDirectory">Optional initial directory to pre-select.</param>
+    string? SelectFolder(string? initialDirectory = null);
 }

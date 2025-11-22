@@ -28,6 +28,8 @@ namespace PhotoAnimator.App.Services
         private int _fps = 12;
         private bool _loopPlayback = true;
         private readonly object _sync = new();
+        private long _lastPublishedFrameNumber;
+        private long _droppedFrames;
 
         /// <summary>
         /// Construct a new controller optionally providing a target dispatcher. If null, uses <see cref="Dispatcher.CurrentDispatcher"/>.
@@ -45,7 +47,7 @@ namespace PhotoAnimator.App.Services
         }
 
         /// <inheritdoc />
-        public event EventHandler<int>? FrameChanged;
+        public event EventHandler<FrameChangedEventArgs>? FrameChanged;
 
         /// <inheritdoc />
         public bool IsPlaying
@@ -67,7 +69,7 @@ namespace PhotoAnimator.App.Services
             {
                 lock (_sync)
                 {
-                    if (value < 6 || value > 24) throw new ArgumentOutOfRangeException(nameof(value), "FPS must be between 6 and 24.");
+                    if (value < 6 || value > 60) throw new ArgumentOutOfRangeException(nameof(value), "FPS must be between 6 and 60.");
                     if (_fps == value) return;
                     _fps = value;
                     if (_isPlaying && _timer != null)
@@ -103,6 +105,8 @@ namespace PhotoAnimator.App.Services
                 if (_isPlaying) return Task.CompletedTask;
                 _frames = frames;
                 _currentIndex = 0;
+                _lastPublishedFrameNumber = 0;
+                _droppedFrames = 0;
                 _stopwatch.Restart();
                 _isPlaying = true;
                 if (_timer != null)
@@ -115,7 +119,7 @@ namespace PhotoAnimator.App.Services
 
             if (initialIndexToRaise >= 0)
             {
-                RaiseFrameChanged(initialIndexToRaise);
+                RaiseFrameChanged(new FrameChangedEventArgs(initialIndexToRaise, 0, 0, 0, TimeSpan.Zero));
             }
 
             return Task.CompletedTask;
@@ -139,25 +143,39 @@ namespace PhotoAnimator.App.Services
         /// <inheritdoc />
         public void Rewind()
         {
-            int indexToRaise = -1;
+            FrameChangedEventArgs? args = null;
             lock (_sync)
             {
                 _currentIndex = 0;
-                indexToRaise = 0;
+                _lastPublishedFrameNumber = 0;
+                _droppedFrames = 0;
+                if (_stopwatch.IsRunning)
+                {
+                    _stopwatch.Restart();
+                }
+                else
+                {
+                    _stopwatch.Reset();
+                }
+                args = new FrameChangedEventArgs(0, 0, 0, 0, TimeSpan.Zero);
             }
-            if (indexToRaise >= 0) RaiseFrameChanged(indexToRaise);
+            if (args != null) RaiseFrameChanged(args);
         }
 
         /// <inheritdoc />
         public void Tick()
         {
-            int changedIndex = -1;
+            FrameChangedEventArgs? argsToRaise = null;
             bool shouldAutoStop = false;
             lock (_sync)
             {
                 if (!_isPlaying || _frames == null) return;
-                double elapsedSeconds = _stopwatch.Elapsed.TotalSeconds;
+                TimeSpan elapsed = _stopwatch.Elapsed;
+                double elapsedSeconds = elapsed.TotalSeconds;
                 int frameCount = _frames.Count;
+                double totalFramesExact = elapsedSeconds * _fps;
+                long totalFramesFloor = (long)Math.Floor(totalFramesExact);
+                long droppedSinceLast = Math.Max(0, totalFramesFloor - _lastPublishedFrameNumber - 1);
 
                 int newIndex;
                 if (_loopPlayback)
@@ -167,34 +185,40 @@ namespace PhotoAnimator.App.Services
                 else
                 {
                     // Non-looping: clamp at last frame; stop when past end.
-                    double idealFrame = elapsedSeconds * _fps;
-                    if (idealFrame >= frameCount)
+                    if (totalFramesFloor >= frameCount)
                     {
                         newIndex = frameCount - 1;
                         shouldAutoStop = true;
                     }
                     else
                     {
-                        newIndex = (int)Math.Floor(idealFrame);
+                        newIndex = (int)Math.Floor(totalFramesExact);
                     }
                 }
 
-                if (newIndex != _currentIndex)
+                if (newIndex != _currentIndex || droppedSinceLast > 0)
                 {
                     _currentIndex = newIndex;
-                    changedIndex = newIndex;
+                    _droppedFrames += droppedSinceLast;
+                    _lastPublishedFrameNumber = totalFramesFloor;
+                    argsToRaise = new FrameChangedEventArgs(
+                        newIndex,
+                        totalFramesFloor,
+                        droppedSinceLast,
+                        _droppedFrames,
+                        elapsed);
                 }
-            }
-
-            if (changedIndex >= 0)
-            {
-                RaiseFrameChanged(changedIndex);
             }
 
             if (shouldAutoStop)
             {
                 // Perform stop outside lock to avoid deadlocks; no frame change event on stop.
                 Stop();
+            }
+
+            if (argsToRaise != null)
+            {
+                RaiseFrameChanged(argsToRaise);
             }
         }
 
@@ -206,13 +230,13 @@ namespace PhotoAnimator.App.Services
         /// <summary>
         /// Raises the <see cref="FrameChanged"/> event on the dispatcher thread if required.
         /// </summary>
-        /// <param name="index">New frame index.</param>
-        private void RaiseFrameChanged(int index)
+        /// <param name="args">Frame change payload.</param>
+        private void RaiseFrameChanged(FrameChangedEventArgs args)
         {
             var handler = FrameChanged;
             if (handler == null) return;
 
-            void Raise() => handler(this, index);
+            void Raise() => handler(this, args);
 
             if (_dispatcher.CheckAccess())
             {

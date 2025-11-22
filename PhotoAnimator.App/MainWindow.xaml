@@ -6,7 +6,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:PhotoAnimator.App.Controls"
         mc:Ignorable="d"
-        Title="Photo Animator"
+        Title="Photo Animator v1.0.1"
         MinWidth="900"
         MinHeight="600"
         SizeToContent="WidthAndHeight"
@@ -27,6 +27,10 @@
     </Window.Resources>
 
     <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />  <!-- Toolbar -->
             <RowDefinition Height="*" />     <!-- Image surface -->
@@ -34,7 +38,45 @@
             <RowDefinition Height="Auto" />  <!-- Status bar -->
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="{DynamicResource {x:Static SystemColors.ControlLightBrushKey}}" Padding="4">
+        <Border Grid.Row="0"
+                Grid.RowSpan="4"
+                Grid.Column="0"
+                Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                BorderThickness="0,0,1,0"
+                Padding="4"
+                IsEnabled="{Binding IsInteractionEnabled}">
+            <Expander ExpandDirection="Right"
+                      IsExpanded="{Binding IsTrayOpen, Mode=TwoWay}"
+                      Width="240">
+                <Expander.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Recent folders" FontWeight="Bold" />
+                        <TextBlock Text="{Binding RecentFolders.Count, StringFormat={}({0})}"
+                                   Margin="6,0,0,0"
+                                   Opacity="0.7" />
+                    </StackPanel>
+                </Expander.Header>
+                <ItemsControl ItemsSource="{Binding RecentFolders}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Tag="{Binding}"
+                                    Click="OnRecentFolderClick"
+                                    Margin="0,3,0,3"
+                                    Padding="6,6"
+                                    HorizontalContentAlignment="Left">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="-" Margin="0,0,6,0" />
+                                    <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" Width="170" />
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Expander>
+        </Border>
+
+        <Border Grid.Row="0" Grid.Column="1" Background="{DynamicResource {x:Static SystemColors.ControlLightBrushKey}}" Padding="4" IsEnabled="{Binding IsInteractionEnabled}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -46,6 +88,8 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" /> <!-- Loop playback checkbox -->
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <Button Grid.Column="0" Style="{StaticResource ToolbarButton}" Content="Open Folder" Click="OnOpenFolderClick" />
@@ -72,14 +116,27 @@
                           IsChecked="{Binding LoopPlayback, Mode=TwoWay}"
                           VerticalAlignment="Center"
                           Margin="24,0,0,0" />
+
+                <StackPanel Grid.Column="9" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <TextBlock Text="Elapsed:" VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <TextBlock Text="{Binding ElapsedTimeDisplay}" FontWeight="Bold" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <Button Grid.Column="10"
+                        Style="{StaticResource ToolbarButton}"
+                        Content="Help"
+                        Click="OnHelpClick"
+                        HorizontalAlignment="Right"
+                        Margin="12,0,0,0" />
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" Background="Black">
+        <Grid Grid.Row="1" Grid.Column="1" Background="Black">
             <controls:DoubleBufferedImageControl x:Name="PART_ImageSurface" />
         </Grid>
 
         <Slider Grid.Row="2"
+                Grid.Column="1"
                 x:Name="PART_ScrubSlider"
                 Margin="8,4"
                 Minimum="0"
@@ -89,9 +146,10 @@
                 Value="{Binding CurrentFrameIndex, Mode=OneWay}"
                 PreviewMouseDown="ScrubSlider_PreviewMouseDown"
                 PreviewMouseUp="ScrubSlider_PreviewMouseUp"
-                ValueChanged="ScrubSlider_ValueChanged" />
+                ValueChanged="ScrubSlider_ValueChanged"
+                IsEnabled="{Binding IsInteractionEnabled}" />
 
-        <Border Grid.Row="3" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}" Padding="4" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="3" Grid.Column="1" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}" Padding="4" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,1,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -99,7 +157,9 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Column="0" Style="{StaticResource StatusText}" Text="Frames:" />
@@ -108,13 +168,16 @@
                 <TextBlock Grid.Column="2" Style="{StaticResource StatusText}" Text="Current:" />
                 <TextBlock Grid.Column="3" Style="{StaticResource StatusText}" Text="{Binding CurrentFrameIndex}" />
 
-                <TextBlock Grid.Column="4" Style="{StaticResource StatusText}">
+                <TextBlock Grid.Column="4" Style="{StaticResource StatusText}" Text="Dropped:" />
+                <TextBlock Grid.Column="5" Style="{StaticResource StatusText}" Text="{Binding DroppedFrames}" />
+
+                <TextBlock Grid.Column="6" Style="{StaticResource StatusText}">
                     <TextBlock.Text>
                         <Binding Path="FolderPath" />
                     </TextBlock.Text>
                 </TextBlock>
 
-                <StackPanel Grid.Column="5" Orientation="Horizontal" HorizontalAlignment="Right">
+                <StackPanel Grid.Column="7" Orientation="Horizontal" HorizontalAlignment="Right">
                     <TextBlock Margin="8,2,8,2" Text="Preload:" Visibility="{Binding IsPreloading, Converter={StaticResource BoolToVis}}" />
                     <TextBlock Margin="0,2,8,2" Visibility="{Binding IsPreloading, Converter={StaticResource BoolToVis}}">
                         <Run Text="{Binding PreloadCount, Mode=OneWay}" />
@@ -145,6 +208,68 @@
                         </TextBlock.Style>
                     </TextBlock>
                 </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="0"
+                Grid.Column="0"
+                Grid.ColumnSpan="2"
+                Grid.RowSpan="4"
+                Background="#AA000000"
+                Visibility="{Binding IsHelpVisible, Converter={StaticResource BoolToVis}}"
+                Panel.ZIndex="10">
+            <Grid>
+                <Border Background="{DynamicResource {x:Static SystemColors.ControlLightBrushKey}}"
+                        Padding="16"
+                        MaxWidth="520"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        CornerRadius="4">
+                    <StackPanel>
+                        <TextBlock Text="Keyboard Shortcuts" FontSize="18" FontWeight="Bold" Margin="0,0,0,8" />
+                        <Grid Margin="0,4,0,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="Bold" Text="Space" Margin="0,0,8,0" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="Play / Pause" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" FontWeight="Bold" Text="Left Arrow" Margin="0,2,8,0" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="Previous frame" Margin="0,2,0,0" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" FontWeight="Bold" Text="Right Arrow" Margin="0,2,8,0" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="Next frame" Margin="0,2,0,0" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" FontWeight="Bold" Text="Home" Margin="0,2,8,0" />
+                            <TextBlock Grid.Row="3" Grid.Column="1" Text="Rewind to start" Margin="0,2,0,0" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" FontWeight="Bold" Text="R" Margin="0,2,8,0" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Text="Reload current folder" Margin="0,2,0,0" />
+
+                            <TextBlock Grid.Row="5" Grid.Column="0" FontWeight="Bold" Text="F1" Margin="0,2,8,0" />
+                            <TextBlock Grid.Row="5" Grid.Column="1" Text="Show this help" Margin="0,2,0,0" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" FontWeight="Bold" Text="Esc" Margin="0,2,8,0" />
+                            <TextBlock Grid.Row="6" Grid.Column="1" Text="Close help overlay" Margin="0,2,0,0" />
+                        </Grid>
+
+                        <Button Content="Close"
+                                HorizontalAlignment="Right"
+                                Padding="10,6"
+                                Click="OnCloseHelpClick" />
+                    </StackPanel>
+                </Border>
             </Grid>
         </Border>
     </Grid>

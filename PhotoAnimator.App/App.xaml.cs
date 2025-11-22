@@ -27,6 +27,7 @@ public partial class App : System.Windows.Application
         Services.RegisterSingleton<IConcurrencySettings>(_ => new ConcurrencySettings());
         Services.RegisterSingleton<IDecodeScalingStrategy>(_ => new DecodeScalingStrategy());
         Services.RegisterSingleton<IImageDecodeService>(_ => new ImageDecodeService());
+        Services.RegisterSingleton<IAppSettingsService>(_ => new AppSettingsService());
         Services.RegisterSingleton<IFrameCache>(sp => new FrameCache(
             sp.GetRequired<IConcurrencySettings>(),
             sp.GetRequired<IDecodeScalingStrategy>(),
@@ -39,7 +40,8 @@ public partial class App : System.Windows.Application
             sp.GetRequired<IImageDecodeService>(),
             sp.GetRequired<IFrameCache>(),
             sp.GetRequired<IPlaybackController>(),
-            sp.GetRequired<IConcurrencySettings>()));
+            sp.GetRequired<IConcurrencySettings>(),
+            sp.GetRequired<IAppSettingsService>()));
         Services.RegisterSingleton<MainWindow>(sp => new MainWindow(
             sp.GetRequired<MainViewModel>(),
             sp.GetRequired<IFrameCache>(),
