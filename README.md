@@ -21,4 +21,4 @@ Small WPF utility that scans a folder of JPEG frames and plays them back with sc
 
 ## Development
 - Tests cover folder sorting and playback frame-index math: `dotnet test` (solution).
-- Project targets `net8.0-windows` with WPF; no external runtime dependencies beyond the BCL.
+- Project targets `net9.0-windows` with WPF; no external runtime dependencies beyond the BCL.
