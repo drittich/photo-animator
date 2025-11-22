@@ -19,22 +19,22 @@ namespace PhotoAnimator.App.Services
                 var type = Type.GetType("Microsoft.WindowsAPICodePack.Dialogs.CommonOpenFileDialog, Microsoft.WindowsAPICodePack.Shell");
                 if (type != null)
                 {
-                    dynamic dialog = Activator.CreateInstance(type)!;
-                    dialog.IsFolderPicker = true;
-                    var result = dialog.ShowDialog();
+                    var dialogInstance = Activator.CreateInstance(type);
+                    if (dialogInstance == null)
+                    {
+                        return null;
+                    }
+                    var isFolderPickerProp = type.GetProperty("IsFolderPicker");
+                    isFolderPickerProp?.SetValue(dialogInstance, true);
+
+                    var showDialogMethod = type.GetMethod("ShowDialog");
+                    var result = showDialogMethod?.Invoke(dialogInstance, null);
                     // Compare by string to avoid referencing enum type directly.
                     if (result != null && result.ToString() == "Ok")
                     {
                         // Requirement specifies SelectedFolder; attempt it first, fallback to FileName.
-                        string? selected = null;
-                        try
-                        {
-                            selected = dialog.SelectedFolder as string;
-                        }
-                        catch
-                        {
-                            try { selected = dialog.FileName as string; } catch { /* ignore */ }
-                        }
+                        string? selected = type.GetProperty("SelectedFolder")?.GetValue(dialogInstance) as string ??
+                                           type.GetProperty("FileName")?.GetValue(dialogInstance) as string;
 
                         if (!string.IsNullOrWhiteSpace(selected))
                         {

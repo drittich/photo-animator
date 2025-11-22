@@ -143,8 +143,7 @@ namespace PhotoAnimator.App.Services
                 if (!_isPlaying || _frames == null) return;
                 double elapsedSeconds = _stopwatch.Elapsed.TotalSeconds;
                 int frameCount = _frames.Count;
-                double idealFrame = elapsedSeconds * _fps;
-                int newIndex = (int)(idealFrame % frameCount);
+                int newIndex = PlaybackMath.CalculateFrameIndex(elapsedSeconds, _fps, frameCount);
                 if (newIndex != _currentIndex)
                 {
                     _currentIndex = newIndex;

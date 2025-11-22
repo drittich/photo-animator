@@ -96,7 +96,7 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Column="0" Style="{StaticResource StatusText}" Text="Frames:" />
-                <TextBlock Grid.Column="1" Style="{StaticResource StatusText}" Text="{Binding PreloadCount, Mode=OneWay}" />
+                <TextBlock Grid.Column="1" Style="{StaticResource StatusText}" Text="{Binding FrameCount, Mode=OneWay}" />
 
                 <TextBlock Grid.Column="2" Style="{StaticResource StatusText}" Text="Current:" />
                 <TextBlock Grid.Column="3" Style="{StaticResource StatusText}" Text="{Binding CurrentFrameIndex}" />

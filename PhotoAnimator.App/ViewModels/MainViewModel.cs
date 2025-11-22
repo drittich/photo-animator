@@ -389,10 +389,7 @@ namespace PhotoAnimator.App.ViewModels
             finally
             {
                 IsPreloading = false;
-                if (!ct.IsCancellationRequested && PreloadCount < PreloadTotal)
-                {
-                    PreloadCount = PreloadTotal;
-                }
+                PreloadCount = Math.Min(PreloadCount, PreloadTotal);
                 RefreshCommandStates();
             }
 
