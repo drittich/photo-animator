@@ -30,6 +30,9 @@ namespace PhotoAnimator.App.Services
         private readonly object _sync = new();
         private long _lastPublishedFrameNumber;
         private long _droppedFrames;
+        private int _startFrameIndex;
+        private long _startAbsoluteFrameNumber;
+        private TimeSpan _elapsedBase = TimeSpan.Zero;
 
         /// <summary>
         /// Construct a new controller optionally providing a target dispatcher. If null, uses <see cref="Dispatcher.CurrentDispatcher"/>.
@@ -95,18 +98,33 @@ namespace PhotoAnimator.App.Services
 
         /// <inheritdoc />
         public Task StartAsync(IReadOnlyList<FrameMetadata> frames, CancellationToken ct)
+            => StartAsync(frames, 0, 0, TimeSpan.Zero, ct);
+
+        /// <inheritdoc />
+        public Task StartAsync(IReadOnlyList<FrameMetadata> frames, int startFrameIndex, long startAbsoluteFrameNumber, TimeSpan startElapsed, CancellationToken ct)
         {
             if (ct.IsCancellationRequested) return Task.FromCanceled(ct);
             if (frames == null || frames.Count == 0) throw new ArgumentException("Frames collection must be non-null and contain at least one frame.", nameof(frames));
 
-            int initialIndexToRaise = -1;
+            FrameChangedEventArgs? initialArgs = null;
             lock (_sync)
             {
                 if (_isPlaying) return Task.CompletedTask;
                 _frames = frames;
-                _currentIndex = 0;
-                _lastPublishedFrameNumber = 0;
+                int frameCount = frames.Count;
+                int clampedIndex = Math.Clamp(startFrameIndex, 0, frameCount - 1);
+                long absoluteStart = Math.Max(0, startAbsoluteFrameNumber);
+                if (absoluteStart < clampedIndex)
+                {
+                    absoluteStart = clampedIndex;
+                }
+
+                _startFrameIndex = clampedIndex;
+                _startAbsoluteFrameNumber = absoluteStart;
+                _currentIndex = clampedIndex;
+                _lastPublishedFrameNumber = absoluteStart;
                 _droppedFrames = 0;
+                _elapsedBase = startElapsed < TimeSpan.Zero ? TimeSpan.Zero : startElapsed;
                 _stopwatch.Restart();
                 _isPlaying = true;
                 if (_timer != null)
@@ -114,12 +132,12 @@ namespace PhotoAnimator.App.Services
                     _timer.Interval = TimeSpan.FromMilliseconds(Math.Max(2.0, 1000.0 / _fps / 2.0));
                     _timer.Start();
                 }
-                initialIndexToRaise = 0;
+                initialArgs = new FrameChangedEventArgs(clampedIndex, absoluteStart, 0, _droppedFrames, _elapsedBase);
             }
 
-            if (initialIndexToRaise >= 0)
+            if (initialArgs != null)
             {
-                RaiseFrameChanged(new FrameChangedEventArgs(initialIndexToRaise, 0, 0, 0, TimeSpan.Zero));
+                RaiseFrameChanged(initialArgs);
             }
 
             return Task.CompletedTask;
@@ -146,9 +164,12 @@ namespace PhotoAnimator.App.Services
             FrameChangedEventArgs? args = null;
             lock (_sync)
             {
+                _startFrameIndex = 0;
+                _startAbsoluteFrameNumber = 0;
                 _currentIndex = 0;
                 _lastPublishedFrameNumber = 0;
                 _droppedFrames = 0;
+                _elapsedBase = TimeSpan.Zero;
                 if (_stopwatch.IsRunning)
                 {
                     _stopwatch.Restart();
@@ -170,29 +191,30 @@ namespace PhotoAnimator.App.Services
             lock (_sync)
             {
                 if (!_isPlaying || _frames == null) return;
-                TimeSpan elapsed = _stopwatch.Elapsed;
-                double elapsedSeconds = elapsed.TotalSeconds;
+                TimeSpan elapsed = _elapsedBase + _stopwatch.Elapsed;
                 int frameCount = _frames.Count;
-                double totalFramesExact = elapsedSeconds * _fps;
+                double totalFramesExact = _startAbsoluteFrameNumber + _stopwatch.Elapsed.TotalSeconds * _fps;
                 long totalFramesFloor = (long)Math.Floor(totalFramesExact);
                 long droppedSinceLast = Math.Max(0, totalFramesFloor - _lastPublishedFrameNumber - 1);
 
                 int newIndex;
                 if (_loopPlayback)
                 {
-                    newIndex = PlaybackMath.CalculateFrameIndex(elapsedSeconds, _fps, frameCount);
+                    newIndex = (int)(totalFramesFloor % frameCount);
                 }
                 else
                 {
-                    // Non-looping: clamp at last frame; stop when past end.
-                    if (totalFramesFloor >= frameCount)
+                    long progressFromStart = totalFramesFloor - _startAbsoluteFrameNumber;
+                    if (progressFromStart < 0) progressFromStart = 0;
+                    long candidateIndex = _startFrameIndex + progressFromStart;
+                    if (candidateIndex >= frameCount)
                     {
                         newIndex = frameCount - 1;
                         shouldAutoStop = true;
                     }
                     else
                     {
-                        newIndex = (int)Math.Floor(totalFramesExact);
+                        newIndex = (int)Math.Clamp(candidateIndex, 0, frameCount - 1);
                     }
                 }
 

@@ -69,8 +69,12 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // Lock size so further dynamic changes do not shift position.
         SizeToContent = SizeToContent.Manual;
         UpdateViewportFromSurface();
+
+        // Ensure centering after final layout pass (WindowStartupLocation was overridden by size changes).
+        Dispatcher.BeginInvoke(new Action(CenterWindowOnScreen), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -404,5 +408,16 @@ public partial class MainWindow : Window
         _onDemandDecodeCts?.Cancel();
         _onDemandDecodeCts?.Dispose();
         _onDemandDecodeCts = null;
+    }
+
+    private void CenterWindowOnScreen()
+    {
+        // Use WorkArea to avoid covering taskbar.
+        var work = SystemParameters.WorkArea;
+        if (ActualWidth > 0 && ActualHeight > 0)
+        {
+            Left = work.Left + (work.Width - ActualWidth) / 2;
+            Top = work.Top + (work.Height - ActualHeight) / 2;
+        }
     }
 }
