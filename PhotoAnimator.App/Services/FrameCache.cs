@@ -31,6 +31,10 @@ namespace PhotoAnimator.App.Services
         private const int SoftPreloadLimit = 500;
         private const int SafeAxisDecodeLimit = 4096;
 
+        private int _viewportWidth = FallbackViewportWidth;
+        private int _viewportHeight = FallbackViewportHeight;
+        private int _generation;
+
         /// <summary>
         /// Legacy constructor preserved for backward compatibility. Uses a no-op scaling strategy and
         /// internally creates a default <see cref="ImageDecodeService"/> instance.
@@ -56,6 +60,18 @@ namespace PhotoAnimator.App.Services
             _decodeService = decodeService ?? throw new ArgumentNullException(nameof(decodeService));
         }
 
+        /// <inheritdoc />
+        public void UpdateViewportSize(int pixelWidth, int pixelHeight)
+        {
+            if (pixelWidth <= 0 || pixelHeight <= 0)
+            {
+                return;
+            }
+
+            Volatile.Write(ref _viewportWidth, pixelWidth);
+            Volatile.Write(ref _viewportHeight, pixelHeight);
+        }
+
         /// <summary>
         /// Preloads frames into the cache with adaptive scaling (when strategy returns target axis) and
         /// memory + concurrency safeguards:
@@ -74,6 +90,7 @@ namespace PhotoAnimator.App.Services
             if (frames.Count == 0) return;
 
             int targetCount = Math.Min(frames.Count, SoftPreloadLimit);
+            int generation = Volatile.Read(ref _generation);
             int parallel = Math.Max(1, Math.Min(_settings.MaxParallelDecodes, MaxConcurrentDecodeCap));
             bool heavyMode = frames.Count > SoftPreloadLimit;
             if (heavyMode)
@@ -98,6 +115,10 @@ namespace PhotoAnimator.App.Services
                         Debug.WriteLine("[FrameCache] Memory soft cap reached; halting further preload scheduling.");
                         break;
                     }
+                    if (generation != Volatile.Read(ref _generation))
+                    {
+                        break; // Cache was cleared mid-preload; abort scheduling new work.
+                    }
 
                     int frameIndex = i;
                     ct.ThrowIfCancellationRequested();
@@ -116,17 +137,24 @@ namespace PhotoAnimator.App.Services
                                 ReportProgress(ref decodedCount, progress);
                                 return;
                             }
+                            if (generation != Volatile.Read(ref _generation))
+                            {
+                                return; // Cache cleared; drop this decode.
+                            }
                             var fm = frames[frameIndex];
                             var cached = fm.TryGetBitmapCached();
                             if (cached != null)
                             {
-                                _bitmaps.TryAdd(frameIndex, cached);
+                                if (generation == Volatile.Read(ref _generation))
+                                {
+                                    _bitmaps.TryAdd(frameIndex, cached);
+                                }
                                 ReportProgress(ref decodedCount, progress);
                                 return;
                             }
                             var bitmap = await DecodeFrameAsync(fm, frameIndex, ct).ConfigureAwait(false);
 
-                            if (bitmap != null)
+                            if (bitmap != null && generation == Volatile.Read(ref _generation))
                             {
                                 _bitmaps.TryAdd(frameIndex, bitmap);
 
@@ -173,6 +201,7 @@ namespace PhotoAnimator.App.Services
         public async Task<BitmapSource?> GetOrDecodeAsync(FrameMetadata frame, int frameIndex, CancellationToken ct)
         {
             if (frame is null) throw new ArgumentNullException(nameof(frame));
+            int generation = Volatile.Read(ref _generation);
             if (_bitmaps.TryGetValue(frameIndex, out var cached))
             {
                 return cached;
@@ -181,11 +210,11 @@ namespace PhotoAnimator.App.Services
             try
             {
                 var bitmap = await DecodeFrameAsync(frame, frameIndex, ct).ConfigureAwait(false);
-                if (bitmap != null)
+                if (bitmap != null && generation == Volatile.Read(ref _generation))
                 {
                     _bitmaps.TryAdd(frameIndex, bitmap);
                 }
-                return bitmap;
+                return generation == Volatile.Read(ref _generation) ? bitmap : null;
             }
             catch (OperationCanceledException)
             {
@@ -207,7 +236,11 @@ namespace PhotoAnimator.App.Services
         /// <summary>
         /// Clears all cached decoded bitmaps, releasing their memory.
         /// </summary>
-        public void Clear() => _bitmaps.Clear();
+        public void Clear()
+        {
+            _bitmaps.Clear();
+            Interlocked.Increment(ref _generation);
+        }
 
         /// <summary>
         /// Maximum number of frames eagerly preloaded before deferring to lazy decode.
@@ -227,9 +260,10 @@ namespace PhotoAnimator.App.Services
                 var (pw, ph) = await _decodeService.ProbeDimensionsAsync(fm.FilePath, ct).ConfigureAwait(false);
                 probedWidth = pw;
                 probedHeight = ph;
+                var (viewportWidth, viewportHeight) = GetViewportBounds();
                 var (targetW, targetH) = _scalingStrategy.GetTargetPixelsForViewport(
-                    FallbackViewportWidth,
-                    FallbackViewportHeight,
+                    viewportWidth,
+                    viewportHeight,
                     pw,
                     ph);
 
@@ -309,6 +343,18 @@ namespace PhotoAnimator.App.Services
             return (null, scaledHeight);
         }
 
+        private (int width, int height) GetViewportBounds()
+        {
+            int w = Volatile.Read(ref _viewportWidth);
+            int h = Volatile.Read(ref _viewportHeight);
+            if (w <= 0 || h <= 0)
+            {
+                return (FallbackViewportWidth, FallbackViewportHeight);
+            }
+
+            return (w, h);
+        }
+
         /// <summary>
         /// No-op scaling strategy used by the legacy constructor to preserve previous behavior.
         /// </summary>
@@ -318,16 +364,17 @@ namespace PhotoAnimator.App.Services
                 => (null, null);
         }
 
-        private static BitmapSource EnforceMaxCacheSize(BitmapSource bitmap)
+        private BitmapSource EnforceMaxCacheSize(BitmapSource bitmap)
         {
-            if (bitmap.PixelWidth <= FallbackViewportWidth && bitmap.PixelHeight <= FallbackViewportHeight)
+            var (maxWidth, maxHeight) = GetViewportBounds();
+            if (bitmap.PixelWidth <= maxWidth && bitmap.PixelHeight <= maxHeight)
             {
                 return bitmap;
             }
 
             double scale = Math.Min(
-                (double)FallbackViewportWidth / bitmap.PixelWidth,
-                (double)FallbackViewportHeight / bitmap.PixelHeight);
+                (double)maxWidth / bitmap.PixelWidth,
+                (double)maxHeight / bitmap.PixelHeight);
 
             if (scale >= 1.0)
             {

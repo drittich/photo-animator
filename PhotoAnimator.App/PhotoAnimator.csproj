@@ -1,28 +1,31 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows7.0</TargetFramework>
-    <AssemblyName>PhotoAnimator</AssemblyName>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF>true</UseWPF>
-    <UseWindowsForms>true</UseWindowsForms>
-    <Title>PhotoAnimator</Title>
-    <Version>1.0.1</Version>
-    <ApplicationIcon>Assets\photoanim.ico</ApplicationIcon>
-  </PropertyGroup>
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net9.0-windows7.0</TargetFramework>
+		<AssemblyName>PhotoAnimator</AssemblyName>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UseWPF>true</UseWPF>
+		<UseWindowsForms>true</UseWindowsForms>
+		<Title>PhotoAnimator</Title>
+		<Version>1.0.1</Version>
+		<ApplicationIcon>Assets\photoanim.ico</ApplicationIcon>
+		<Description>A Windows utility that scans a folder of JPEG frames and plays them back with scrubbing and keyboard shortcuts.</Description>
+		<Authors>D'Arcy Rittich</Authors>
+		<Copyright>D'Arcy Rittich</Copyright>
+	</PropertyGroup>
 
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <DebugType>embedded</DebugType>
-  </PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+		<DebugType>embedded</DebugType>
+	</PropertyGroup>
 
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <DebugType>embedded</DebugType>
-  </PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+		<DebugType>embedded</DebugType>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <Resource Include="Assets\photoanim.ico" />
-  </ItemGroup>
+	<ItemGroup>
+		<Resource Include="Assets\photoanim.ico" />
+	</ItemGroup>
 
 </Project>

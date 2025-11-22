@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Controls;
 using System.ComponentModel;
@@ -23,6 +24,9 @@ public partial class MainWindow : Window
     private bool _wasPlayingBeforeScrub;
     private bool _isScrubbing;
     private CancellationTokenSource? _onDemandDecodeCts;
+    private long _latestRenderRequestId;
+    private int _lastViewportWidth;
+    private int _lastViewportHeight;
 
     public int[] FpsOptions { get; } = new[] { 6, 8, 10, 12, 15, 16, 18, 20, 24, 25, 30, 60 };
 
@@ -53,6 +57,7 @@ public partial class MainWindow : Window
 
         _imageSurface = FindName("PART_ImageSurface") as DoubleBufferedImageControl;
         _scrubSlider = FindName("PART_ScrubSlider") as Slider;
+        InitializeViewportTracking();
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         AdjustSliderMaximum();
 
@@ -64,20 +69,28 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // Lock size so further dynamic changes do not shift position.
         SizeToContent = SizeToContent.Manual;
+        UpdateViewportFromSurface();
+
+        // Ensure centering after final layout pass (WindowStartupLocation was overridden by size changes).
+        Dispatcher.BeginInvoke(new Action(CenterWindowOnScreen), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
         _playbackController.FrameChanged -= OnPlaybackFrameChanged;
-        _onDemandDecodeCts?.Cancel();
-        _onDemandDecodeCts?.Dispose();
+        ResetDecodeCts();
+        if (_imageSurface != null)
+        {
+            _imageSurface.SizeChanged -= OnImageSurfaceSizeChanged;
+        }
     }
 
     private void OnPlaybackFrameChanged(object? sender, FrameChangedEventArgs args)
     {
         if (args.FrameIndex < 0) return;
-        _ = ShowFrameAsync(args.FrameIndex, cancelPrevious: true);
+        _ = ShowFrameAsync(args.FrameIndex, cancelPrevious: false);
     }
 
     private void OnOpenFolderClick(object sender, RoutedEventArgs e)
@@ -200,6 +213,11 @@ public partial class MainWindow : Window
         {
             AdjustSliderMaximum();
         }
+        else if (e.PropertyName == nameof(MainViewModel.IsPreloading) && _viewModel.IsPreloading)
+        {
+            // Cancel any lingering decodes when a reload begins so old frames do not repopulate the cache.
+            ResetDecodeCts();
+        }
     }
  
     private void AdjustSliderMaximum()
@@ -211,6 +229,46 @@ public partial class MainWindow : Window
         {
             _scrubSlider.Value = max;
         }
+    }
+
+    private void InitializeViewportTracking()
+    {
+        if (_imageSurface == null) return;
+        _imageSurface.SizeChanged += OnImageSurfaceSizeChanged;
+        UpdateViewportFromSurface();
+    }
+
+    private void OnImageSurfaceSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateViewportFromSurface();
+    }
+
+    private bool UpdateViewportFromSurface()
+    {
+        if (_imageSurface == null)
+        {
+            return false;
+        }
+
+        if (_imageSurface.ActualWidth <= 0 || _imageSurface.ActualHeight <= 0)
+        {
+            return false;
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(_imageSurface);
+        int pixelWidth = Math.Max(1, (int)Math.Round(_imageSurface.ActualWidth * dpi.DpiScaleX));
+        int pixelHeight = Math.Max(1, (int)Math.Round(_imageSurface.ActualHeight * dpi.DpiScaleY));
+
+        _frameCache.UpdateViewportSize(pixelWidth, pixelHeight);
+
+        if (pixelWidth == _lastViewportWidth && pixelHeight == _lastViewportHeight)
+        {
+            return false;
+        }
+
+        _lastViewportWidth = pixelWidth;
+        _lastViewportHeight = pixelHeight;
+        return true;
     }
 
     private void TogglePlayPause()
@@ -291,6 +349,8 @@ public partial class MainWindow : Window
         if (_imageSurface == null) return Task.CompletedTask;
         if (index < 0 || index >= _viewModel.FrameCount) return Task.CompletedTask;
 
+        long requestId = Interlocked.Increment(ref _latestRenderRequestId);
+
         var cached = _frameCache.GetIfDecoded(index);
         if (cached is BitmapSource bitmapCached)
         {
@@ -298,25 +358,19 @@ public partial class MainWindow : Window
             return Task.CompletedTask;
         }
 
-        if (cancelPrevious)
-        {
-            _onDemandDecodeCts?.Cancel();
-            _onDemandDecodeCts?.Dispose();
-        }
+        var token = GetDecodeToken(cancelPrevious);
+        return FetchAndRenderAsync(index, token, requestId);
 
-        var cts = new CancellationTokenSource();
-        _onDemandDecodeCts = cts;
-
-        return FetchAndRenderAsync(index, cts.Token);
-
-        async Task FetchAndRenderAsync(int frameIndex, CancellationToken token)
+        async Task FetchAndRenderAsync(int frameIndex, CancellationToken token, long request)
         {
             try
             {
                 if (token.IsCancellationRequested) return;
                 var frame = _viewModel.Frames[frameIndex];
                 var decoded = await _frameCache.GetOrDecodeAsync(frame, frameIndex, token).ConfigureAwait(true);
-                if (decoded is BitmapSource bmp && !token.IsCancellationRequested)
+                if (decoded is BitmapSource bmp &&
+                    !token.IsCancellationRequested &&
+                    request == Interlocked.Read(ref _latestRenderRequestId))
                 {
                     _imageSurface.UpdateFrame(bmp);
                 }
@@ -329,6 +383,41 @@ public partial class MainWindow : Window
             {
                 Debug.WriteLine($"[MainWindow] Frame render error at {frameIndex}: {ex.Message}");
             }
+        }
+    }
+
+    private CancellationToken GetDecodeToken(bool reset)
+    {
+        if (reset)
+        {
+            ResetDecodeCts();
+        }
+
+        if (_onDemandDecodeCts == null || _onDemandDecodeCts.IsCancellationRequested)
+        {
+            _onDemandDecodeCts?.Dispose();
+            _onDemandDecodeCts = new CancellationTokenSource();
+        }
+
+        return _onDemandDecodeCts.Token;
+    }
+
+    private void ResetDecodeCts()
+    {
+        Interlocked.Increment(ref _latestRenderRequestId);
+        _onDemandDecodeCts?.Cancel();
+        _onDemandDecodeCts?.Dispose();
+        _onDemandDecodeCts = null;
+    }
+
+    private void CenterWindowOnScreen()
+    {
+        // Use WorkArea to avoid covering taskbar.
+        var work = SystemParameters.WorkArea;
+        if (ActualWidth > 0 && ActualHeight > 0)
+        {
+            Left = work.Left + (work.Width - ActualWidth) / 2;
+            Top = work.Top + (work.Height - ActualHeight) / 2;
         }
     }
 }

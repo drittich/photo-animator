@@ -54,6 +54,17 @@ namespace PhotoAnimator.App.Services
         Task StartAsync(IReadOnlyList<FrameMetadata> frames, CancellationToken ct);
 
         /// <summary>
+        /// Starts playback from a specific frame index using the provided absolute frame number as the elapsed baseline.
+        /// Useful for resuming after a pause or a scrub without rewinding to the start.
+        /// </summary>
+        /// <param name="frames">Ordered list of frame metadata to loop.</param>
+        /// <param name="startFrameIndex">Zero-based frame index to begin from.</param>
+        /// <param name="startAbsoluteFrameNumber">Absolute frame number to treat as the starting baseline for drop counting.</param>
+        /// <param name="startElapsed">Elapsed playback time to resume from (used for the elapsed clock).</param>
+        /// <param name="ct">Cancellation token (checked once on start).</param>
+        Task StartAsync(IReadOnlyList<FrameMetadata> frames, int startFrameIndex, long startAbsoluteFrameNumber, TimeSpan startElapsed, CancellationToken ct);
+
+        /// <summary>
         /// Stops playback (no frame change event is raised). Safe to call when not playing.
         /// </summary>
         void Stop();

@@ -1,6 +1,6 @@
 # Photo Animator
 
-Small Windows utility that scans a folder of JPEG frames and plays them back with scrubbing and keyboard shortcuts.
+A Windows utility that scans a folder of JPEG frames and plays them back with scrubbing and keyboard shortcuts.
 
 ## Features
 - Folder scan for `.jpg`/`.jpeg`, alphabetically sorted with lazy decode to keep startup fast.

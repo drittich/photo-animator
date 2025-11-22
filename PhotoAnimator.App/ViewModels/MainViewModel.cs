@@ -396,9 +396,13 @@ namespace PhotoAnimator.App.ViewModels
         private void Play()
         {
             if (_frames.Count == 0) return;
-            ResetPlaybackMetrics();
             _playbackController.FramesPerSecond = _selectedFps;
-            _ = _playbackController.StartAsync(_frames, CancellationToken.None);
+
+            int startIndex = Math.Clamp(_currentFrameIndex, 0, Math.Max(0, _frames.Count - 1));
+            long absoluteStart = Math.Max(0, _lastAbsoluteFrameNumber);
+            var startElapsed = _elapsed < TimeSpan.Zero ? TimeSpan.Zero : _elapsed;
+
+            _ = _playbackController.StartAsync(_frames, startIndex, absoluteStart, startElapsed, CancellationToken.None);
             IsPlaying = true;
         }
 

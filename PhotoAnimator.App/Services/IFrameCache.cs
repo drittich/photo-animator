@@ -67,5 +67,13 @@ namespace PhotoAnimator.App.Services
         /// Maximum number of frames the cache will preload before deferring remaining frames to lazy decode.
         /// </summary>
         int PreloadSoftCap { get; }
+
+        /// <summary>
+        /// Provides the current viewport size in physical pixels so scaling can target the actual display
+        /// instead of a fixed fallback. Call whenever the render surface is resized.
+        /// </summary>
+        /// <param name="pixelWidth">Viewport width in device pixels.</param>
+        /// <param name="pixelHeight">Viewport height in device pixels.</param>
+        void UpdateViewportSize(int pixelWidth, int pixelHeight);
     }
 }
