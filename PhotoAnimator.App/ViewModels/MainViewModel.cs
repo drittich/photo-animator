@@ -114,6 +114,21 @@ namespace PhotoAnimator.App.ViewModels
         }
 
         /// <summary>
+        /// When true playback loops (wraps) to the first frame after the last; when false playback stops automatically on the last frame.
+        /// Proxies <see cref="IPlaybackController.LoopPlayback"/>.
+        /// </summary>
+        public bool LoopPlayback
+        {
+            get => _playbackController.LoopPlayback;
+            set
+            {
+                if (_playbackController.LoopPlayback == value) return;
+                _playbackController.LoopPlayback = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
         /// True while elapsed-time playback is active.
         /// </summary>
         public bool IsPlaying

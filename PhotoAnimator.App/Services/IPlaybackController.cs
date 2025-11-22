@@ -12,7 +12,7 @@ namespace PhotoAnimator.App.Services
     /// Drop-frame logic: on each <see cref="Tick"/> the ideal frame index is computed from elapsed time (elapsedSeconds * FPS).
     /// If the newly computed index differs from the previously published index the controller raises <see cref="FrameChanged"/>.
     /// This allows the controller to skip (drop) intermediate frames automatically when the UI thread is busy,
-    /// keeping playback tempo accurate while minimizing workload. Frames loop continuously.
+    /// keeping playback tempo accurate while minimizing workload. Frames may loop if <see cref="LoopPlayback"/> is true.
     /// </summary>
     public interface IPlaybackController
     {
@@ -36,6 +36,12 @@ namespace PhotoAnimator.App.Services
         /// Changing this while playing adjusts scheduling without restarting or rewinding.
         /// </summary>
         int FramesPerSecond { get; set; }
+
+        /// <summary>
+        /// If true playback loops (wraps) when elapsed time exceeds sequence duration.
+        /// If false playback stops automatically on the last frame and <see cref="IsPlaying"/> becomes false.
+        /// </summary>
+        bool LoopPlayback { get; set; }
 
         /// <summary>
         /// Starts playback over the provided frame list if not already playing.

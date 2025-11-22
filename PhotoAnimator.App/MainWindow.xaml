@@ -44,6 +44,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" /> <!-- Loop playback checkbox -->
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
@@ -52,7 +53,7 @@
                 <Button Grid.Column="2" Style="{StaticResource ToolbarButton}" Content="Stop" Click="OnStopClick" />
                 <Button Grid.Column="3" Style="{StaticResource ToolbarButton}" Content="Rewind" Click="OnRewindClick" />
                 <Button Grid.Column="4" Style="{StaticResource ToolbarButton}" Content="Reload" Click="OnReloadClick" />
-
+                
                 <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
                     <TextBlock Text="FPS:" VerticalAlignment="Center" Margin="0,0,4,0" />
                     <ComboBox Width="80"
@@ -60,11 +61,17 @@
                               SelectedValue="{Binding SelectedFps, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                               VerticalAlignment="Center" />
                 </StackPanel>
-
+                
                 <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
                     <TextBlock Text="Parallel Decodes:" VerticalAlignment="Center" Margin="0,0,4,0" />
                     <TextBlock Text="{Binding MaxParallelDecodes}" VerticalAlignment="Center" />
                 </StackPanel>
+
+                <CheckBox Grid.Column="7"
+                          Content="Loop playback"
+                          IsChecked="{Binding LoopPlayback, Mode=TwoWay}"
+                          VerticalAlignment="Center"
+                          Margin="24,0,0,0" />
             </Grid>
         </Border>
 

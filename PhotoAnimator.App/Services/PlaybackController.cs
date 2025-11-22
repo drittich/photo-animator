@@ -26,6 +26,7 @@ namespace PhotoAnimator.App.Services
         private int _currentIndex;
         private bool _isPlaying;
         private int _fps = 12;
+        private bool _loopPlayback = true;
         private readonly object _sync = new();
 
         /// <summary>
@@ -73,6 +74,19 @@ namespace PhotoAnimator.App.Services
                     {
                         _timer.Interval = TimeSpan.FromMilliseconds(1000.0 / _fps / 2.0);
                     }
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public bool LoopPlayback
+        {
+            get { lock (_sync) return _loopPlayback; }
+            set
+            {
+                lock (_sync)
+                {
+                    _loopPlayback = value;
                 }
             }
         }
@@ -138,21 +152,49 @@ namespace PhotoAnimator.App.Services
         public void Tick()
         {
             int changedIndex = -1;
+            bool shouldAutoStop = false;
             lock (_sync)
             {
                 if (!_isPlaying || _frames == null) return;
                 double elapsedSeconds = _stopwatch.Elapsed.TotalSeconds;
                 int frameCount = _frames.Count;
-                int newIndex = PlaybackMath.CalculateFrameIndex(elapsedSeconds, _fps, frameCount);
+
+                int newIndex;
+                if (_loopPlayback)
+                {
+                    newIndex = PlaybackMath.CalculateFrameIndex(elapsedSeconds, _fps, frameCount);
+                }
+                else
+                {
+                    // Non-looping: clamp at last frame; stop when past end.
+                    double idealFrame = elapsedSeconds * _fps;
+                    if (idealFrame >= frameCount)
+                    {
+                        newIndex = frameCount - 1;
+                        shouldAutoStop = true;
+                    }
+                    else
+                    {
+                        newIndex = (int)Math.Floor(idealFrame);
+                    }
+                }
+
                 if (newIndex != _currentIndex)
                 {
                     _currentIndex = newIndex;
                     changedIndex = newIndex;
                 }
             }
+
             if (changedIndex >= 0)
             {
                 RaiseFrameChanged(changedIndex);
+            }
+
+            if (shouldAutoStop)
+            {
+                // Perform stop outside lock to avoid deadlocks; no frame change event on stop.
+                Stop();
             }
         }
 
