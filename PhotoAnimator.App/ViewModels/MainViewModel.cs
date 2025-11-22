@@ -363,7 +363,8 @@ namespace PhotoAnimator.App.ViewModels
                 _frameCache.Clear();
                 _frames.Clear();
 
-                var scanned = await _folderScanner.ScanAsync(FolderPath, ct).ConfigureAwait(false);
+                // Resume on UI context (no ConfigureAwait(false)) so collection modifications are thread-safe.
+                var scanned = await _folderScanner.ScanAsync(FolderPath, ct);
                 FrameCount = scanned.Count;
                 PreloadTotal = Math.Min(scanned.Count, _frameCache.PreloadSoftCap);
                 PreloadCount = 0;
@@ -376,7 +377,8 @@ namespace PhotoAnimator.App.ViewModels
 
                 var progress = new Progress<int>(count => PreloadCount = Math.Min(count, PreloadTotal));
 
-                await _frameCache.PreloadAsync(scanned, null, null, progress, ct).ConfigureAwait(false);
+                // Keep continuation on UI thread for property updates.
+                await _frameCache.PreloadAsync(scanned, null, null, progress, ct);
             }
             catch (OperationCanceledException)
             {
