@@ -5,52 +5,59 @@ using System.Windows.Media.Imaging;
 using System.Windows.Controls;
 using System.ComponentModel;
 using System.Windows.Input;
+using System.Threading;
 using PhotoAnimator.App.Services;
 using PhotoAnimator.App.ViewModels;
 using PhotoAnimator.App.Controls;
-using WinForms = System.Windows.Forms;
 
 namespace PhotoAnimator.App;
 
 public partial class MainWindow : Window
 {
-    private readonly FolderScanner _folderScanner;
-    private readonly ImageDecodeService _imageDecodeService;
-    private readonly ConcurrencySettings _concurrencySettings;
-    private readonly FrameCache _frameCache;
-    private readonly PlaybackController _playbackController;
+    private readonly IFrameCache _frameCache;
+    private readonly IPlaybackController _playbackController;
     private readonly IFolderDialogService _folderDialogService;
     private readonly MainViewModel _viewModel;
     private readonly DoubleBufferedImageControl? _imageSurface;
     private Slider? _scrubSlider;
     private bool _wasPlayingBeforeScrub;
     private bool _isScrubbing;
+    private CancellationTokenSource? _onDemandDecodeCts;
 
     public int[] FpsOptions { get; } = new[] { 6, 8, 10, 12, 15, 18, 20, 24 };
 
     public MainWindow()
+        : this(
+            App.Services.GetRequired<MainViewModel>(),
+            App.Services.GetRequired<IFrameCache>(),
+            App.Services.GetRequired<IPlaybackController>(),
+            App.Services.GetRequired<IFolderDialogService>())
     {
+    }
+
+    public MainWindow(
+        MainViewModel viewModel,
+        IFrameCache frameCache,
+        IPlaybackController playbackController,
+        IFolderDialogService folderDialogService)
+    {
+        _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
+        _frameCache = frameCache ?? throw new ArgumentNullException(nameof(frameCache));
+        _playbackController = playbackController ?? throw new ArgumentNullException(nameof(playbackController));
+        _folderDialogService = folderDialogService ?? throw new ArgumentNullException(nameof(folderDialogService));
+
         InitializeComponent();
         Loaded += (_, __) => Focus();
- 
-        _folderScanner = new FolderScanner();
-        _imageDecodeService = new ImageDecodeService();
-        _concurrencySettings = new ConcurrencySettings();
-        var scaling = new DecodeScalingStrategy();
-        _frameCache = new FrameCache(_concurrencySettings, scaling, _imageDecodeService);
-        _playbackController = new PlaybackController();
-        _folderDialogService = new FolderDialogService();
-        _viewModel = new MainViewModel(_folderScanner, _imageDecodeService, _frameCache, _playbackController, _concurrencySettings);
- 
+
         DataContext = _viewModel;
- 
+
         _imageSurface = FindName("PART_ImageSurface") as DoubleBufferedImageControl;
         _scrubSlider = FindName("PART_ScrubSlider") as Slider;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         AdjustSliderMaximum();
- 
+
         _playbackController.FrameChanged += OnPlaybackFrameChanged;
- 
+
         Loaded += OnLoaded;
         Closed += OnClosed;
     }
@@ -63,16 +70,14 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _playbackController.FrameChanged -= OnPlaybackFrameChanged;
+        _onDemandDecodeCts?.Cancel();
+        _onDemandDecodeCts?.Dispose();
     }
 
     private void OnPlaybackFrameChanged(object? sender, int index)
     {
         if (index < 0) return;
-        var bmp = _frameCache.GetIfDecoded(index);
-        if (bmp is BitmapSource bitmap && _imageSurface != null)
-        {
-            _imageSurface.UpdateFrame(bitmap);
-        }
+        _ = ShowFrameAsync(index, cancelPrevious: true);
     }
 
     private void OnOpenFolderClick(object sender, RoutedEventArgs e)
@@ -146,11 +151,7 @@ public partial class MainWindow : Window
         if (idx != _viewModel.CurrentFrameIndex)
         {
             _viewModel.SetCurrentFrameIndex(idx);
-            var bmp = _frameCache.GetIfDecoded(idx);
-            if (bmp is BitmapSource bitmap && _imageSurface != null)
-            {
-                _imageSurface.UpdateFrame(bitmap);
-            }
+            _ = ShowFrameAsync(idx, cancelPrevious: true);
         }
     }
 
@@ -167,7 +168,7 @@ public partial class MainWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainViewModel.PreloadCount))
+        if (e.PropertyName == nameof(MainViewModel.FrameCount))
         {
             AdjustSliderMaximum();
         }
@@ -176,7 +177,7 @@ public partial class MainWindow : Window
     private void AdjustSliderMaximum()
     {
         if (_scrubSlider == null) return;
-        int max = Math.Max(0, _viewModel.PreloadCount - 1);
+        int max = Math.Max(0, _viewModel.FrameCount - 1);
         _scrubSlider.Maximum = max;
         if (_scrubSlider.Value > max)
         {
@@ -200,15 +201,11 @@ public partial class MainWindow : Window
 
     private void StepFrame(int delta)
     {
-        int newIndex = Math.Clamp(_viewModel.CurrentFrameIndex + delta, 0, Math.Max(0, _viewModel.PreloadCount - 1));
+        int newIndex = Math.Clamp(_viewModel.CurrentFrameIndex + delta, 0, Math.Max(0, _viewModel.FrameCount - 1));
         if (newIndex != _viewModel.CurrentFrameIndex)
         {
             _viewModel.SetCurrentFrameIndex(newIndex);
-            var bmp = _frameCache.GetIfDecoded(newIndex);
-            if (bmp is BitmapSource bitmap && _imageSurface != null)
-            {
-                _imageSurface.UpdateFrame(bitmap);
-            }
+            _ = ShowFrameAsync(newIndex, cancelPrevious: true);
         }
     }
 
@@ -242,6 +239,52 @@ public partial class MainWindow : Window
                     e.Handled = true;
                 }
                 break;
+        }
+    }
+
+    private Task ShowFrameAsync(int index, bool cancelPrevious)
+    {
+        if (_imageSurface == null) return Task.CompletedTask;
+        if (index < 0 || index >= _viewModel.FrameCount) return Task.CompletedTask;
+
+        var cached = _frameCache.GetIfDecoded(index);
+        if (cached is BitmapSource bitmapCached)
+        {
+            _imageSurface.UpdateFrame(bitmapCached);
+            return Task.CompletedTask;
+        }
+
+        if (cancelPrevious)
+        {
+            _onDemandDecodeCts?.Cancel();
+            _onDemandDecodeCts?.Dispose();
+        }
+
+        var cts = new CancellationTokenSource();
+        _onDemandDecodeCts = cts;
+
+        return FetchAndRenderAsync(index, cts.Token);
+
+        async Task FetchAndRenderAsync(int frameIndex, CancellationToken token)
+        {
+            try
+            {
+                if (token.IsCancellationRequested) return;
+                var frame = _viewModel.Frames[frameIndex];
+                var decoded = await _frameCache.GetOrDecodeAsync(frame, frameIndex, token).ConfigureAwait(true);
+                if (decoded is BitmapSource bmp && !token.IsCancellationRequested)
+                {
+                    _imageSurface.UpdateFrame(bmp);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Ignore cancellation.
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[MainWindow] Frame render error at {frameIndex}: {ex.Message}");
+            }
         }
     }
 }

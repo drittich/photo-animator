@@ -11,6 +11,7 @@ namespace PhotoAnimator.App.Services
     {
         private readonly object _sync = new();
         private int _maxParallelDecodes;
+        private const int HardMaxParallelDecodes = 8;
 
         /// <summary>
         /// Initializes a new instance with a default value based on the current processor count
@@ -19,7 +20,7 @@ namespace PhotoAnimator.App.Services
         public ConcurrencySettings()
         {
             int processors = Environment.ProcessorCount;
-            _maxParallelDecodes = Math.Min(4, Math.Max(1, processors));
+            _maxParallelDecodes = Math.Min(4, Math.Min(HardMaxParallelDecodes, Math.Max(1, processors)));
         }
 
         /// <inheritdoc />
@@ -37,7 +38,7 @@ namespace PhotoAnimator.App.Services
         /// <inheritdoc />
         public void SetMaxParallelDecodes(int value)
         {
-            int maxAllowed = Environment.ProcessorCount * 4;
+            int maxAllowed = Math.Max(2, Math.Min(HardMaxParallelDecodes, Environment.ProcessorCount * 2));
             if (value < 1 || value > maxAllowed)
                 throw new ArgumentOutOfRangeException(nameof(value), $"Value must be between 1 and {maxAllowed}.");
 

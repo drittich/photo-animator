@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,6 +37,7 @@ namespace PhotoAnimator.App.ViewModels
         private int _preloadCount;
         private int _preloadTotal;
         private CancellationTokenSource? _loadCts;
+        private int _frameCount;
 
         // Commands
         private readonly RelayCommand _playCommand;
@@ -67,7 +69,7 @@ namespace PhotoAnimator.App.ViewModels
             _playCommand = new RelayCommand(Play, () => !_isPlaying && _frames.Count > 0 && !_isPreloading);
             _stopCommand = new RelayCommand(Stop, () => _isPlaying);
             _rewindCommand = new RelayCommand(Rewind, () => _frames.Count > 0);
-            _reloadCommand = new RelayCommand(() => { if (_folderPath != null) _ = LoadFramesAsync(); }, () => _folderPath != null && !_isPreloading);
+            _reloadCommand = new RelayCommand(() => { if (_folderPath != null) _ = ReloadAsync(); }, () => _folderPath != null && !_isPreloading);
             _openFolderCommand = new RelayCommand(() => { /* Placeholder, actual folder path must be set via FolderPath then Load */ }, () => !_isPreloading);
             _scrubCommand = new IntParameterCommand(Scrub, () => _frames.Count > 0);
         }
@@ -192,6 +194,20 @@ namespace PhotoAnimator.App.ViewModels
         public double PreloadPercent => _preloadTotal == 0 ? 0 : (double)_preloadCount / _preloadTotal;
 
         /// <summary>
+        /// Total frames currently available after scanning the folder (decoded or lazy).
+        /// </summary>
+        public int FrameCount
+        {
+            get => _frameCount;
+            private set
+            {
+                if (_frameCount == value) return;
+                _frameCount = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
         /// Maximum number of parallel frame decode operations. Proxies the underlying concurrency settings.
         /// Setting this invokes <see cref="IConcurrencySettings.SetMaxParallelDecodes(int)"/> which may validate range.
         /// </summary>
@@ -254,6 +270,15 @@ namespace PhotoAnimator.App.ViewModels
         }
 
         /// <summary>
+        /// Reloads the current folder preserving the FPS and attempting to restore playback state.
+        /// </summary>
+        public Task ReloadAsync()
+        {
+            if (FolderPath == null) return Task.CompletedTask;
+            return LoadFramesAsync(preservePlaybackState: true);
+        }
+
+        /// <summary>
         /// Internal playback start logic. Assigns FPS to controller, starts playback and updates state.
         /// </summary>
         private void Play()
@@ -311,7 +336,7 @@ namespace PhotoAnimator.App.ViewModels
         /// Progress updates <see cref="PreloadCount"/>. Cancels any previous load via internal CTS.
         /// Subscribes to playback frame change events after successful preload.
         /// </summary>
-        private async Task LoadFramesAsync()
+        private async Task LoadFramesAsync(bool preservePlaybackState = false)
         {
             if (FolderPath == null) return;
 
@@ -319,31 +344,47 @@ namespace PhotoAnimator.App.ViewModels
             _loadCts?.Cancel();
             _loadCts = new CancellationTokenSource();
             var ct = _loadCts.Token;
+            bool resumePlayback = preservePlaybackState && _isPlaying;
+            int desiredIndex = preservePlaybackState ? _currentFrameIndex : 0;
+
+            if (_isPlaying)
+            {
+                Stop();
+            }
 
             try
             {
                 IsPreloading = true;
                 PreloadCount = 0;
+                PreloadTotal = 0;
+                FrameCount = 0;
                 CurrentFrameIndex = 0;
 
+                _frameCache.Clear();
                 _frames.Clear();
 
                 var scanned = await _folderScanner.ScanAsync(FolderPath, ct).ConfigureAwait(false);
-                PreloadTotal = scanned.Count;
+                FrameCount = scanned.Count;
+                PreloadTotal = Math.Min(scanned.Count, _frameCache.PreloadSoftCap);
                 PreloadCount = 0;
                 foreach (var fm in scanned)
                 {
                     ct.ThrowIfCancellationRequested();
                     _frames.Add(fm);
                 }
+                OnPropertyChanged(nameof(Frames));
 
-                var progress = new Progress<int>(count => PreloadCount = count);
+                var progress = new Progress<int>(count => PreloadCount = Math.Min(count, PreloadTotal));
 
                 await _frameCache.PreloadAsync(scanned, null, null, progress, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 // Swallow cancellation (expected).
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[MainViewModel] LoadFramesAsync error: {ex.Message}");
             }
             finally
             {
@@ -358,6 +399,16 @@ namespace PhotoAnimator.App.ViewModels
             // Subscribe to playback frame changes (idempotent subscription).
             _playbackController.FrameChanged -= OnPlaybackFrameChanged;
             _playbackController.FrameChanged += OnPlaybackFrameChanged;
+
+            if (!ct.IsCancellationRequested && _frames.Count > 0)
+            {
+                int clampedIndex = Math.Clamp(desiredIndex, 0, _frames.Count - 1);
+                CurrentFrameIndex = clampedIndex;
+                if (resumePlayback)
+                {
+                    Play();
+                }
+            }
 
             RefreshCommandStates();
         }

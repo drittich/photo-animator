@@ -26,6 +26,9 @@ namespace PhotoAnimator.App.Services
         private const long MemoryLimitBytes = 500L * 1024 * 1024; // 500 MB soft cap.
         private const int FallbackViewportWidth = 1920;
         private const int FallbackViewportHeight = 1080;
+        private const int MaxConcurrentDecodeCap = 4;
+        private const int SoftPreloadLimit = 500;
+        private const int SafeAxisDecodeLimit = 4096;
 
         /// <summary>
         /// Legacy constructor preserved for backward compatibility. Uses a no-op scaling strategy and
@@ -69,8 +72,9 @@ namespace PhotoAnimator.App.Services
             if (frames is null) throw new ArgumentNullException(nameof(frames));
             if (frames.Count == 0) return;
 
-            int parallel = Math.Max(1, _settings.MaxParallelDecodes);
-            bool heavyMode = frames.Count > 500;
+            int targetCount = Math.Min(frames.Count, SoftPreloadLimit);
+            int parallel = Math.Max(1, Math.Min(_settings.MaxParallelDecodes, MaxConcurrentDecodeCap));
+            bool heavyMode = frames.Count > SoftPreloadLimit;
             if (heavyMode)
             {
                 parallel = Math.Min(parallel, 2);
@@ -81,13 +85,13 @@ namespace PhotoAnimator.App.Services
             bool memoryLimitReached = false;
 
             var semaphore = new SemaphoreSlim(parallel, parallel);
-            var tasks = new List<Task>(frames.Count);
+            var tasks = new List<Task>(targetCount);
 
             try
             {
-                for (int i = 0; i < frames.Count; i++)
+                for (int i = 0; i < targetCount; i++)
                 {
-                    if (memoryLimitReached)
+                    if (Volatile.Read(ref memoryLimitReached))
                     {
                         // Stop scheduling new decodes; leave remaining frames for lazy decoding later.
                         Debug.WriteLine("[FrameCache] Memory soft cap reached; halting further preload scheduling.");
@@ -107,65 +111,44 @@ namespace PhotoAnimator.App.Services
 
                             // Skip if already decoded/cached.
                             if (_bitmaps.ContainsKey(frameIndex))
+                            {
+                                ReportProgress(ref decodedCount, progress);
                                 return;
+                            }
                             var fm = frames[frameIndex];
                             var cached = fm.TryGetBitmapCached();
                             if (cached != null)
                             {
                                 _bitmaps.TryAdd(frameIndex, cached);
-                                int newValCached = Interlocked.Increment(ref decodedCount);
-                                progress?.Report(newValCached);
+                                ReportProgress(ref decodedCount, progress);
                                 return;
                             }
-
-                            BitmapSource? bitmap = null;
-
-                            // Adaptive scaling path: probe + choose axis; ignore provided targetPixelWidth/Height here
-                            // (they remain for API compatibility and future external use).
-                            try
-                            {
-                                var (pw, ph) = await _decodeService.ProbeDimensionsAsync(fm.FilePath, ct).ConfigureAwait(false);
-                                var (targetW, targetH) = _scalingStrategy.GetTargetPixelsForViewport(
-                                    FallbackViewportWidth,
-                                    FallbackViewportHeight,
-                                    pw,
-                                    ph);
-
-                                if (targetW.HasValue || targetH.HasValue)
-                                {
-                                    bitmap = await _decodeService
-                                        .DecodeAsync(fm.FilePath, targetW, targetH, ct)
-                                        .ConfigureAwait(false);
-                                }
-                            }
-                            catch (Exception ex) when (ex is not OperationCanceledException)
-                            {
-                                // Probe failure or scaled decode failure: fallback to lazy full decode.
-                                Debug.WriteLine($"[FrameCache] Probe/scaled decode error for frame {frameIndex}: {ex.Message}. Falling back.");
-                            }
-
-                            if (bitmap == null)
-                            {
-                                // Fallback to frame's own lazy decode (could be full-size).
-                                bitmap = await fm.GetBitmapAsync(ct).ConfigureAwait(false);
-                            }
+                            var bitmap = await DecodeFrameAsync(fm, frameIndex, ct).ConfigureAwait(false);
 
                             if (bitmap != null)
                             {
                                 _bitmaps.TryAdd(frameIndex, bitmap);
 
                                 // Progress update.
-                                int newValue = Interlocked.Increment(ref decodedCount);
-                                progress?.Report(newValue);
+                                ReportProgress(ref decodedCount, progress);
 
                                 // Memory accounting.
                                 long estimate = (long)bitmap.PixelWidth * bitmap.PixelHeight * 4;
                                 long newTotal = Interlocked.Add(ref totalBytes, estimate);
                                 if (newTotal > MemoryLimitBytes)
                                 {
-                                    memoryLimitReached = true;
+                                    Volatile.Write(ref memoryLimitReached, true);
                                 }
                             }
+                            else
+                            {
+                                ReportProgress(ref decodedCount, progress);
+                            }
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            Debug.WriteLine($"[FrameCache] Decode failure for frame {frameIndex}: {ex.Message}. Skipping.");
+                            ReportProgress(ref decodedCount, progress);
                         }
                         finally
                         {
@@ -184,6 +167,37 @@ namespace PhotoAnimator.App.Services
         }
 
         /// <summary>
+        /// Retrieves a bitmap from the cache if present, otherwise decodes it with the same safeguards as preload.
+        /// </summary>
+        public async Task<BitmapSource?> GetOrDecodeAsync(FrameMetadata frame, int frameIndex, CancellationToken ct)
+        {
+            if (frame is null) throw new ArgumentNullException(nameof(frame));
+            if (_bitmaps.TryGetValue(frameIndex, out var cached))
+            {
+                return cached;
+            }
+
+            try
+            {
+                var bitmap = await DecodeFrameAsync(frame, frameIndex, ct).ConfigureAwait(false);
+                if (bitmap != null)
+                {
+                    _bitmaps.TryAdd(frameIndex, bitmap);
+                }
+                return bitmap;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[FrameCache] On-demand decode error for frame {frameIndex}: {ex.Message}. Skipping.");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Retrieves a bitmap for the specified frame index if already decoded and cached.
         /// </summary>
         public BitmapSource? GetIfDecoded(int frameIndex) =>
@@ -193,6 +207,106 @@ namespace PhotoAnimator.App.Services
         /// Clears all cached decoded bitmaps, releasing their memory.
         /// </summary>
         public void Clear() => _bitmaps.Clear();
+
+        /// <summary>
+        /// Maximum number of frames eagerly preloaded before deferring to lazy decode.
+        /// </summary>
+        public int PreloadSoftCap => SoftPreloadLimit;
+
+        private async Task<BitmapSource?> DecodeFrameAsync(FrameMetadata fm, int frameIndex, CancellationToken ct)
+        {
+            BitmapSource? bitmap = null;
+            int? probedWidth = null;
+            int? probedHeight = null;
+
+            // Adaptive scaling path: probe + choose axis; ignore provided targetPixelWidth/Height here
+            // (they remain for API compatibility and future external use).
+            try
+            {
+                var (pw, ph) = await _decodeService.ProbeDimensionsAsync(fm.FilePath, ct).ConfigureAwait(false);
+                probedWidth = pw;
+                probedHeight = ph;
+                var (targetW, targetH) = _scalingStrategy.GetTargetPixelsForViewport(
+                    FallbackViewportWidth,
+                    FallbackViewportHeight,
+                    pw,
+                    ph);
+
+                if (targetW.HasValue || targetH.HasValue)
+                {
+                    bitmap = await _decodeService
+                        .DecodeAsync(fm.FilePath, targetW, targetH, ct)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Probe failure or scaled decode failure: fallback to lazy full decode.
+                Debug.WriteLine($"[FrameCache] Probe/scaled decode error for frame {frameIndex}: {ex.Message}. Falling back.");
+            }
+
+            if (bitmap == null)
+            {
+                var (safetyWidth, safetyHeight) = GetSafetyDecodeTarget(probedWidth, probedHeight);
+                if (safetyWidth.HasValue || safetyHeight.HasValue)
+                {
+                    try
+                    {
+                        bitmap = await _decodeService
+                            .DecodeAsync(fm.FilePath, safetyWidth, safetyHeight, ct)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        Debug.WriteLine($"[FrameCache] Safety decode failed for frame {frameIndex}: {ex.Message}. Trying original decode.");
+                    }
+                }
+            }
+
+            if (bitmap == null)
+            {
+                // Fallback to frame's own lazy decode (could be full-size).
+                bitmap = await fm.GetBitmapAsync(ct).ConfigureAwait(false);
+            }
+
+            return bitmap;
+        }
+
+        private static void ReportProgress(ref int decodedCount, IProgress<int>? progress)
+        {
+            int newValue = Interlocked.Increment(ref decodedCount);
+            progress?.Report(newValue);
+        }
+
+        private static (int? targetWidth, int? targetHeight) GetSafetyDecodeTarget(int? probedWidth, int? probedHeight)
+        {
+            if (!probedWidth.HasValue || !probedHeight.HasValue)
+            {
+                return (null, null);
+            }
+
+            int w = probedWidth.Value;
+            int h = probedHeight.Value;
+            if (w <= SafeAxisDecodeLimit && h <= SafeAxisDecodeLimit)
+            {
+                return (null, null);
+            }
+
+            double ratio = Math.Max((double)w / SafeAxisDecodeLimit, (double)h / SafeAxisDecodeLimit);
+            if (ratio <= 1.0)
+            {
+                return (null, null);
+            }
+
+            int scaledWidth = (int)Math.Round(w / ratio);
+            int scaledHeight = (int)Math.Round(h / ratio);
+            if (scaledWidth >= scaledHeight)
+            {
+                return (scaledWidth, null);
+            }
+
+            return (null, scaledHeight);
+        }
 
         /// <summary>
         /// No-op scaling strategy used by the legacy constructor to preserve previous behavior.

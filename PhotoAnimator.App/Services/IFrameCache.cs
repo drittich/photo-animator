@@ -49,9 +49,23 @@ namespace PhotoAnimator.App.Services
         BitmapSource? GetIfDecoded(int frameIndex);
 
         /// <summary>
+        /// Retrieves a decoded bitmap if present or decodes it on demand with the same safeguards as preload.
+        /// The decoded bitmap is cached for subsequent lookups.
+        /// </summary>
+        /// <param name="frame">Frame metadata describing the image to decode.</param>
+        /// <param name="frameIndex">Zero-based index of the frame.</param>
+        /// <param name="ct">Cancellation token.</param>
+        Task<BitmapSource?> GetOrDecodeAsync(FrameMetadata frame, int frameIndex, CancellationToken ct);
+
+        /// <summary>
         /// Clears all cached decoded bitmaps, releasing their memory. Subsequent <see cref="GetIfDecoded(int)"/>
         /// calls will return <c>null</c> until <see cref="PreloadAsync"/> is invoked again.
         /// </summary>
         void Clear();
+
+        /// <summary>
+        /// Maximum number of frames the cache will preload before deferring remaining frames to lazy decode.
+        /// </summary>
+        int PreloadSoftCap { get; }
     }
 }
