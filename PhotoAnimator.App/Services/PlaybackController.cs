@@ -39,7 +39,7 @@ namespace PhotoAnimator.App.Services
         {
             _dispatcher = dispatcher ?? Dispatcher.CurrentDispatcher;
             _stopwatch = new Stopwatch();
-            _timer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+            _timer = new DispatcherTimer(DispatcherPriority.Render, _dispatcher)
             {
                 Interval = TimeSpan.FromMilliseconds(10) // minimal baseline, will be adjusted on start/FPS change
             };
@@ -74,7 +74,7 @@ namespace PhotoAnimator.App.Services
                     _fps = value;
                     if (_isPlaying && _timer != null)
                     {
-                        _timer.Interval = TimeSpan.FromMilliseconds(1000.0 / _fps / 2.0);
+                        _timer.Interval = TimeSpan.FromMilliseconds(Math.Max(2.0, 1000.0 / _fps / 2.0));
                     }
                 }
             }
@@ -111,7 +111,7 @@ namespace PhotoAnimator.App.Services
                 _isPlaying = true;
                 if (_timer != null)
                 {
-                    _timer.Interval = TimeSpan.FromMilliseconds(1000.0 / _fps / 2.0);
+                    _timer.Interval = TimeSpan.FromMilliseconds(Math.Max(2.0, 1000.0 / _fps / 2.0));
                     _timer.Start();
                 }
                 initialIndexToRaise = 0;

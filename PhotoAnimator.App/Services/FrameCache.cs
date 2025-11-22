@@ -31,6 +31,9 @@ namespace PhotoAnimator.App.Services
         private const int SoftPreloadLimit = 500;
         private const int SafeAxisDecodeLimit = 4096;
 
+        private int _viewportWidth = FallbackViewportWidth;
+        private int _viewportHeight = FallbackViewportHeight;
+
         /// <summary>
         /// Legacy constructor preserved for backward compatibility. Uses a no-op scaling strategy and
         /// internally creates a default <see cref="ImageDecodeService"/> instance.
@@ -54,6 +57,18 @@ namespace PhotoAnimator.App.Services
             _settings = concurrencySettings ?? throw new ArgumentNullException(nameof(concurrencySettings));
             _scalingStrategy = scalingStrategy ?? throw new ArgumentNullException(nameof(scalingStrategy));
             _decodeService = decodeService ?? throw new ArgumentNullException(nameof(decodeService));
+        }
+
+        /// <inheritdoc />
+        public void UpdateViewportSize(int pixelWidth, int pixelHeight)
+        {
+            if (pixelWidth <= 0 || pixelHeight <= 0)
+            {
+                return;
+            }
+
+            Volatile.Write(ref _viewportWidth, pixelWidth);
+            Volatile.Write(ref _viewportHeight, pixelHeight);
         }
 
         /// <summary>
@@ -227,9 +242,10 @@ namespace PhotoAnimator.App.Services
                 var (pw, ph) = await _decodeService.ProbeDimensionsAsync(fm.FilePath, ct).ConfigureAwait(false);
                 probedWidth = pw;
                 probedHeight = ph;
+                var (viewportWidth, viewportHeight) = GetViewportBounds();
                 var (targetW, targetH) = _scalingStrategy.GetTargetPixelsForViewport(
-                    FallbackViewportWidth,
-                    FallbackViewportHeight,
+                    viewportWidth,
+                    viewportHeight,
                     pw,
                     ph);
 
@@ -309,6 +325,18 @@ namespace PhotoAnimator.App.Services
             return (null, scaledHeight);
         }
 
+        private (int width, int height) GetViewportBounds()
+        {
+            int w = Volatile.Read(ref _viewportWidth);
+            int h = Volatile.Read(ref _viewportHeight);
+            if (w <= 0 || h <= 0)
+            {
+                return (FallbackViewportWidth, FallbackViewportHeight);
+            }
+
+            return (w, h);
+        }
+
         /// <summary>
         /// No-op scaling strategy used by the legacy constructor to preserve previous behavior.
         /// </summary>
@@ -318,16 +346,17 @@ namespace PhotoAnimator.App.Services
                 => (null, null);
         }
 
-        private static BitmapSource EnforceMaxCacheSize(BitmapSource bitmap)
+        private BitmapSource EnforceMaxCacheSize(BitmapSource bitmap)
         {
-            if (bitmap.PixelWidth <= FallbackViewportWidth && bitmap.PixelHeight <= FallbackViewportHeight)
+            var (maxWidth, maxHeight) = GetViewportBounds();
+            if (bitmap.PixelWidth <= maxWidth && bitmap.PixelHeight <= maxHeight)
             {
                 return bitmap;
             }
 
             double scale = Math.Min(
-                (double)FallbackViewportWidth / bitmap.PixelWidth,
-                (double)FallbackViewportHeight / bitmap.PixelHeight);
+                (double)maxWidth / bitmap.PixelWidth,
+                (double)maxHeight / bitmap.PixelHeight);
 
             if (scale >= 1.0)
             {

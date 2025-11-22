@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Controls;
 using System.ComponentModel;
 using System.Windows.Input;
 using System.Threading;
+using System.Windows.Threading;
 using PhotoAnimator.App.Services;
 using PhotoAnimator.App.ViewModels;
 using PhotoAnimator.App.Controls;
@@ -23,6 +25,9 @@ public partial class MainWindow : Window
     private bool _wasPlayingBeforeScrub;
     private bool _isScrubbing;
     private CancellationTokenSource? _onDemandDecodeCts;
+    private DispatcherTimer? _resizeReloadTimer;
+    private int _lastViewportWidth;
+    private int _lastViewportHeight;
 
     public int[] FpsOptions { get; } = new[] { 6, 8, 10, 12, 15, 16, 18, 20, 24, 25, 30, 60 };
 
@@ -53,6 +58,7 @@ public partial class MainWindow : Window
 
         _imageSurface = FindName("PART_ImageSurface") as DoubleBufferedImageControl;
         _scrubSlider = FindName("PART_ScrubSlider") as Slider;
+        InitializeViewportTracking();
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         AdjustSliderMaximum();
 
@@ -65,6 +71,7 @@ public partial class MainWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         SizeToContent = SizeToContent.Manual;
+        UpdateViewportFromSurface();
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -72,6 +79,12 @@ public partial class MainWindow : Window
         _playbackController.FrameChanged -= OnPlaybackFrameChanged;
         _onDemandDecodeCts?.Cancel();
         _onDemandDecodeCts?.Dispose();
+        if (_imageSurface != null)
+        {
+            _imageSurface.SizeChanged -= OnImageSurfaceSizeChanged;
+        }
+        _resizeReloadTimer?.Stop();
+        _resizeReloadTimer = null;
     }
 
     private void OnPlaybackFrameChanged(object? sender, FrameChangedEventArgs args)
@@ -211,6 +224,81 @@ public partial class MainWindow : Window
         {
             _scrubSlider.Value = max;
         }
+    }
+
+    private void InitializeViewportTracking()
+    {
+        if (_imageSurface == null) return;
+        _imageSurface.SizeChanged += OnImageSurfaceSizeChanged;
+        UpdateViewportFromSurface();
+    }
+
+    private void OnImageSurfaceSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (UpdateViewportFromSurface())
+        {
+            ScheduleViewportReload();
+        }
+    }
+
+    private bool UpdateViewportFromSurface()
+    {
+        if (_imageSurface == null)
+        {
+            return false;
+        }
+
+        if (_imageSurface.ActualWidth <= 0 || _imageSurface.ActualHeight <= 0)
+        {
+            return false;
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(_imageSurface);
+        int pixelWidth = Math.Max(1, (int)Math.Round(_imageSurface.ActualWidth * dpi.DpiScaleX));
+        int pixelHeight = Math.Max(1, (int)Math.Round(_imageSurface.ActualHeight * dpi.DpiScaleY));
+
+        _frameCache.UpdateViewportSize(pixelWidth, pixelHeight);
+
+        if (pixelWidth == _lastViewportWidth && pixelHeight == _lastViewportHeight)
+        {
+            return false;
+        }
+
+        _lastViewportWidth = pixelWidth;
+        _lastViewportHeight = pixelHeight;
+        return true;
+    }
+
+    private void ScheduleViewportReload()
+    {
+        if (_viewModel.FolderPath is null || _viewModel.IsPreloading)
+        {
+            return;
+        }
+
+        _resizeReloadTimer ??= new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(350)
+        };
+        _resizeReloadTimer.Stop();
+        _resizeReloadTimer.Tick -= OnResizeReloadTick;
+        _resizeReloadTimer.Tick += OnResizeReloadTick;
+        _resizeReloadTimer.Start();
+    }
+
+    private async void OnResizeReloadTick(object? sender, EventArgs e)
+    {
+        if (_resizeReloadTimer != null)
+        {
+            _resizeReloadTimer.Stop();
+        }
+
+        if (_viewModel.FolderPath is null || _viewModel.IsPreloading)
+        {
+            return;
+        }
+
+        await _viewModel.ReloadAsync();
     }
 
     private void TogglePlayPause()
