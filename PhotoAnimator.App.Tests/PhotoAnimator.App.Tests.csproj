@@ -17,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\\PhotoAnimator.App\\PhotoAnimator.App.csproj" />
+    <ProjectReference Include="..\PhotoAnimator.App\PhotoAnimator.csproj" />
   </ItemGroup>
 
 </Project>
