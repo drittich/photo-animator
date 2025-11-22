@@ -16,6 +16,7 @@
 		<Copyright>D'Arcy Rittich</Copyright>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/drittich/photo-animator</RepositoryUrl>
+		<PackageTags>photo;animation;stop-motion</PackageTags>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
