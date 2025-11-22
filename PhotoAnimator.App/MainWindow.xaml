@@ -25,7 +25,7 @@
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
         <Style x:Key="TrayExpanderStyle" TargetType="Expander">
-            <Setter Property="ExpandDirection" Value="Right" />
+            <Setter Property="ExpandDirection" Value="Down" />
             <Setter Property="Width" Value="240" />
             <Style.Triggers>
                 <Trigger Property="IsExpanded" Value="False">
