@@ -105,12 +105,12 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Button Grid.Column="0" Style="{StaticResource ToolbarButton}" Content="Open Folder" Click="OnOpenFolderClick" />
-                <Button Grid.Column="1" Style="{StaticResource ToolbarButton}" Content="Play" Click="OnPlayClick" />
-                <Button Grid.Column="2" Style="{StaticResource ToolbarButton}" Content="Stop" Click="OnStopClick" />
-                <Button Grid.Column="3" Style="{StaticResource ToolbarButton}" Content="Rewind" Click="OnRewindClick" />
-                <Button Grid.Column="4" Style="{StaticResource ToolbarButton}" Content="Reload" Click="OnReloadClick" />
-                
+                <Button Grid.Column="0" Style="{StaticResource ToolbarButton}" Content="Folder..." Click="OnOpenFolderClick" ToolTip="Open Folder" AutomationProperties.Name="Open Folder" />
+                <Button Grid.Column="1" Style="{StaticResource ToolbarIconButtonStyle}" Content="&#xE892;" Click="OnRewindClick" ToolTip="Rewind to Start" AutomationProperties.Name="Rewind to Start" />
+                <Button Grid.Column="2" Style="{StaticResource ToolbarIconButtonStyle}" Content="&#xE768;" Click="OnPlayClick" ToolTip="Play" AutomationProperties.Name="Play" />
+                <Button Grid.Column="3" Style="{StaticResource ToolbarIconButtonStyle}" Content="&#xE71A;" Click="OnStopClick" ToolTip="Stop" AutomationProperties.Name="Stop" />
+                <Button Grid.Column="4" Style="{StaticResource ToolbarIconButtonStyle}" Content="&#xE72C;" Click="OnReloadClick" ToolTip="Reload Folder" AutomationProperties.Name="Reload Folder" />
+                 
                 <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
                     <TextBlock Text="FPS:" VerticalAlignment="Center" Margin="0,0,4,0" />
                     <ComboBox Width="40"
@@ -119,11 +119,14 @@
                               VerticalAlignment="Center" />
                 </StackPanel>
 
-                <CheckBox Grid.Column="6"
-                          Content="Loop playback"
-                          IsChecked="{Binding LoopPlayback, Mode=TwoWay}"
-                          VerticalAlignment="Center"
-                          Margin="20,0,0,0" />
+                <ToggleButton Grid.Column="6"
+                              ToolTip="Loop Playback"
+                              AutomationProperties.Name="Loop Playback"
+                              Style="{StaticResource ToolbarIconToggleButtonStyle}"
+                              IsChecked="{Binding LoopPlayback, Mode=TwoWay}"
+                              Content="&#xE8EE;"
+                              VerticalAlignment="Center"
+                              Margin="20,0,0,0" />
 
                 <StackPanel Grid.Column="7" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
                     <TextBlock Text="Elapsed:" VerticalAlignment="Center" Margin="0,0,4,0" />

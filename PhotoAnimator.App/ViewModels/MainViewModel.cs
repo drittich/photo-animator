@@ -57,7 +57,8 @@ namespace PhotoAnimator.App.ViewModels
         private readonly RelayCommand _reloadCommand;
         private readonly RelayCommand _openFolderCommand;
         private readonly IntParameterCommand _scrubCommand;
-
+        private readonly RelayCommand _togglePlayPauseCommand;
+ 
         /// <summary>
         /// Initializes a new instance of <see cref="MainViewModel"/>.
         /// </summary>
@@ -89,6 +90,7 @@ namespace PhotoAnimator.App.ViewModels
             _stopCommand = new RelayCommand(Stop, () => _isPlaying);
             _rewindCommand = new RelayCommand(Rewind, () => _frames.Count > 0);
             _reloadCommand = new RelayCommand(() => { if (_folderPath != null) _ = ReloadAsync(); }, () => _folderPath != null && !_isPreloading);
+            _togglePlayPauseCommand = new RelayCommand(TogglePlayPause, () => _frames.Count > 0 && !_isPreloading);
             _openFolderCommand = new RelayCommand(() => { /* Placeholder, actual folder path must be set via FolderPath then Load */ }, () => !_isPreloading);
             _scrubCommand = new IntParameterCommand(Scrub, () => _frames.Count > 0);
         }
@@ -357,7 +359,12 @@ namespace PhotoAnimator.App.ViewModels
         /// Command to reload frames from the currently selected folder (if any).
         /// </summary>
         public ICommand ReloadCommand => _reloadCommand;
-
+ 
+        /// <summary>
+        /// Command to toggle between play and stop states.
+        /// </summary>
+        public ICommand TogglePlayPauseCommand => _togglePlayPauseCommand;
+ 
         /// <summary>
         /// Command to open a folder; set <see cref="FolderPath"/> externally and invoke this to trigger loading.
         /// For activating load directly with a path, use <see cref="OpenFolder(string)"/>.
@@ -396,6 +403,11 @@ namespace PhotoAnimator.App.ViewModels
         private void Play()
         {
             if (_frames.Count == 0) return;
+            // Rewind when invoking play at the final frame in non-loop mode.
+            if (!_playbackController.LoopPlayback && _currentFrameIndex == _frames.Count - 1)
+            {
+                Rewind(); // resets metrics and frame index to 0
+            }
             _playbackController.FramesPerSecond = _selectedFps;
 
             int startIndex = Math.Clamp(_currentFrameIndex, 0, Math.Max(0, _frames.Count - 1));
@@ -437,6 +449,21 @@ namespace PhotoAnimator.App.ViewModels
                 Stop();
             }
             CurrentFrameIndex = index;
+        }
+
+        /// <summary>
+        /// Toggles playback state: stops if playing; otherwise starts playback.
+        /// </summary>
+        private void TogglePlayPause()
+        {
+            if (IsPlaying)
+            {
+                Stop();
+            }
+            else
+            {
+                Play();
+            }
         }
 
         /// <summary>
@@ -706,6 +733,7 @@ namespace PhotoAnimator.App.ViewModels
             _reloadCommand.RaiseCanExecuteChanged();
             _openFolderCommand.RaiseCanExecuteChanged();
             _scrubCommand.RaiseCanExecuteChanged();
+            _togglePlayPauseCommand.RaiseCanExecuteChanged();
         }
 
         /// <inheritdoc />

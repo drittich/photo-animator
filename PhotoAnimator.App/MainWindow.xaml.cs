@@ -271,19 +271,6 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private void TogglePlayPause()
-    {
-        if (_viewModel.IsPlaying)
-        {
-            var stop = _viewModel.StopCommand;
-            if (stop.CanExecute(null)) stop.Execute(null);
-        }
-        else
-        {
-            var play = _viewModel.PlayCommand;
-            if (play.CanExecute(null)) play.Execute(null);
-        }
-    }
 
     private void StepFrame(int delta)
     {
@@ -305,7 +292,8 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Space:
-                TogglePlayPause();
+                var toggle = _viewModel.TogglePlayPauseCommand;
+                if (toggle.CanExecute(null)) toggle.Execute(null);
                 e.Handled = true;
                 break;
             case Key.Left:
