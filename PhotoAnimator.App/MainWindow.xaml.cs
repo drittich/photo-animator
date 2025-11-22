@@ -134,9 +134,19 @@ public partial class MainWindow : Window
 
     private void OnRecentFolderClick(object sender, RoutedEventArgs e)
     {
-        if (sender is System.Windows.Controls.Button button && button.Tag is string path && !string.IsNullOrWhiteSpace(path))
+        if (sender is System.Windows.Controls.Button button)
         {
-            _viewModel.OpenFolder(path);
+            string? path = button.Tag switch
+            {
+                string s => s,
+                MainViewModel.RecentFolderEntry entry => entry.FullPath,
+                _ => null
+            };
+
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                _viewModel.OpenFolder(path);
+            }
         }
     }
 

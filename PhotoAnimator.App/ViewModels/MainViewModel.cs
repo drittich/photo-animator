@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -41,7 +42,7 @@ namespace PhotoAnimator.App.ViewModels
         private CancellationTokenSource? _loadCts;
         private int _frameCount;
         private readonly IAppSettingsService _settingsService;
-        private readonly ObservableCollection<string> _recentFolders;
+        private readonly ObservableCollection<RecentFolderEntry> _recentFolders;
         private bool _isTrayOpen = true;
         private bool _isHelpVisible;
         private long _droppedFrames;
@@ -76,7 +77,10 @@ namespace PhotoAnimator.App.ViewModels
             _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
 
             _frames = new ObservableCollection<FrameMetadata>();
-            _recentFolders = new ObservableCollection<string>(_settingsService.RecentFolders ?? Array.Empty<string>());
+            _recentFolders = new ObservableCollection<RecentFolderEntry>(
+                (_settingsService.RecentFolders ?? Array.Empty<string>())
+                    .Take(6)
+                    .Select(path => new RecentFolderEntry(path, CountImagesInFolder(path))));
             _isTrayOpen = _recentFolders.Count > 0;
             UpdateElapsedDisplay(TimeSpan.Zero, 0, 0);
 
@@ -97,7 +101,7 @@ namespace PhotoAnimator.App.ViewModels
         /// <summary>
         /// Recently opened folders (most recent first).
         /// </summary>
-        public ObservableCollection<string> RecentFolders => _recentFolders;
+        public ObservableCollection<RecentFolderEntry> RecentFolders => _recentFolders;
 
         /// <summary>
         /// True when the recent-folders tray is expanded.
@@ -478,6 +482,7 @@ namespace PhotoAnimator.App.ViewModels
                 // Resume on UI context (no ConfigureAwait(false)) so collection modifications are thread-safe.
                 var scanned = await _folderScanner.ScanAsync(FolderPath, ct);
                 FrameCount = scanned.Count;
+                UpdateRecentFolderCount(FolderPath, FrameCount);
                 PreloadTotal = Math.Min(scanned.Count, _frameCache.PreloadSoftCap);
                 PreloadCount = 0;
                 foreach (var fm in scanned)
@@ -591,14 +596,99 @@ namespace PhotoAnimator.App.ViewModels
 
         private void SyncRecentFolders()
         {
+            var existing = _recentFolders.ToDictionary(r => r.FullPath, StringComparer.OrdinalIgnoreCase);
             _recentFolders.Clear();
             foreach (var path in _settingsService.RecentFolders.Take(6))
             {
-                _recentFolders.Add(path);
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+
+                if (!existing.TryGetValue(path, out var entry))
+                {
+                    entry = new RecentFolderEntry(path, CountImagesInFolder(path));
+                }
+
+                _recentFolders.Add(entry);
             }
+
             IsTrayOpen = _recentFolders.Count > 0;
             OnPropertyChanged(nameof(RecentFolders));
             OnPropertyChanged(nameof(LastOpenedFolder));
+        }
+
+        private void UpdateRecentFolderCount(string? folderPath, int frameCount)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath) || frameCount < 0) return;
+
+            var entry = _recentFolders.FirstOrDefault(r => string.Equals(r.FullPath, folderPath, StringComparison.OrdinalIgnoreCase));
+            if (entry != null)
+            {
+                entry.ImageCount = frameCount;
+            }
+            else
+            {
+                _recentFolders.Add(new RecentFolderEntry(folderPath, frameCount));
+            }
+        }
+
+        private static int CountImagesInFolder(string folderPath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath)) return 0;
+                int jpg = Directory.EnumerateFiles(folderPath, "*.jpg", SearchOption.TopDirectoryOnly).Count();
+                int jpeg = Directory.EnumerateFiles(folderPath, "*.jpeg", SearchOption.TopDirectoryOnly).Count();
+                return jpg + jpeg;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static string GetFolderName(string? folderPath)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var name = Path.GetFileName(trimmed);
+            return string.IsNullOrEmpty(name) ? folderPath : name;
+        }
+
+        public sealed class RecentFolderEntry : INotifyPropertyChanged
+        {
+            private int _imageCount;
+
+            public RecentFolderEntry(string fullPath, int imageCount)
+            {
+                FullPath = fullPath;
+                _imageCount = imageCount;
+            }
+
+            public string FullPath { get; }
+
+            public string FolderName => GetFolderName(FullPath);
+
+            public int ImageCount
+            {
+                get => _imageCount;
+                set
+                {
+                    if (_imageCount == value) return;
+                    _imageCount = value;
+                    OnPropertyChanged();
+                }
+            }
+
+            public event PropertyChangedEventHandler? PropertyChanged;
+
+            private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
 
         /// <summary>

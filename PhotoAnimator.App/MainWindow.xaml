@@ -24,6 +24,15 @@
             <Setter Property="Margin" Value="8,2,16,2" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
+        <Style x:Key="TrayExpanderStyle" TargetType="Expander">
+            <Setter Property="ExpandDirection" Value="Right" />
+            <Setter Property="Width" Value="240" />
+            <Style.Triggers>
+                <Trigger Property="IsExpanded" Value="False">
+                    <Setter Property="Width" Value="36" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -46,9 +55,8 @@
                 BorderThickness="0,0,1,0"
                 Padding="4"
                 IsEnabled="{Binding IsInteractionEnabled}">
-            <Expander ExpandDirection="Right"
-                      IsExpanded="{Binding IsTrayOpen, Mode=TwoWay}"
-                      Width="240">
+            <Expander IsExpanded="{Binding IsTrayOpen, Mode=TwoWay}"
+                      Style="{StaticResource TrayExpanderStyle}">
                 <Expander.Header>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Recent folders" FontWeight="Bold" />
@@ -60,14 +68,19 @@
                 <ItemsControl ItemsSource="{Binding RecentFolders}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Button Tag="{Binding}"
+                            <Button Tag="{Binding FullPath}"
                                     Click="OnRecentFolderClick"
                                     Margin="0,3,0,3"
                                     Padding="6,6"
-                                    HorizontalContentAlignment="Left">
+                                    HorizontalContentAlignment="Left"
+                                    ToolTip="{Binding FullPath}">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="-" Margin="0,0,6,0" />
-                                    <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" Width="170" />
+                                    <TextBlock Text="{Binding FolderName}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Width="150" />
+                                    <TextBlock Text="{Binding ImageCount, StringFormat={}({0})}"
+                                               Margin="8,0,0,0"
+                                               Opacity="0.7" />
                                 </StackPanel>
                             </Button>
                         </DataTemplate>
@@ -86,9 +99,8 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" /> <!-- Loop playback checkbox -->
-                    <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
@@ -100,29 +112,24 @@
                 
                 <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
                     <TextBlock Text="FPS:" VerticalAlignment="Center" Margin="0,0,4,0" />
-                    <ComboBox Width="80"
+                    <ComboBox Width="40"
                               ItemsSource="{Binding FpsOptions, RelativeSource={RelativeSource AncestorType=Window}}"
                               SelectedValue="{Binding SelectedFps, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                               VerticalAlignment="Center" />
                 </StackPanel>
-                
-                <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
-                    <TextBlock Text="Parallel Decodes:" VerticalAlignment="Center" Margin="0,0,4,0" />
-                    <TextBlock Text="{Binding MaxParallelDecodes}" VerticalAlignment="Center" />
-                </StackPanel>
 
-                <CheckBox Grid.Column="7"
+                <CheckBox Grid.Column="6"
                           Content="Loop playback"
                           IsChecked="{Binding LoopPlayback, Mode=TwoWay}"
                           VerticalAlignment="Center"
-                          Margin="24,0,0,0" />
+                          Margin="20,0,0,0" />
 
-                <StackPanel Grid.Column="9" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                <StackPanel Grid.Column="7" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
                     <TextBlock Text="Elapsed:" VerticalAlignment="Center" Margin="0,0,4,0" />
                     <TextBlock Text="{Binding ElapsedTimeDisplay}" FontWeight="Bold" VerticalAlignment="Center" />
                 </StackPanel>
 
-                <Button Grid.Column="10"
+                <Button Grid.Column="9"
                         Style="{StaticResource ToolbarButton}"
                         Content="Help"
                         Click="OnHelpClick"
