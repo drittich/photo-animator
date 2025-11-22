@@ -11,6 +11,7 @@ Small Windows utility that scans a folder of JPEG frames and plays them back wit
 - Help overlay (button or F1) lists the keyboard controls inline.
 
 ## Keyboard Shortcuts
+
 | Key | Action |
 | --- | ------- |
 | Space | Play/Pause toggle |    
