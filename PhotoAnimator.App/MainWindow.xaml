@@ -79,7 +79,7 @@
                 IsMoveToPointEnabled="True"
                 LargeChange="10"
                 SmallChange="1"
-                Value="{Binding CurrentFrameIndex, Mode=OneWay, PresentationTraceSources.TraceLevel=High}"
+                Value="{Binding CurrentFrameIndex, Mode=OneWay}"
                 PreviewMouseDown="ScrubSlider_PreviewMouseDown"
                 PreviewMouseUp="ScrubSlider_PreviewMouseUp"
                 ValueChanged="ScrubSlider_ValueChanged" />
@@ -118,8 +118,8 @@
                                  Height="16"
                                  Width="150"
                                  Minimum="0"
-                                 Maximum="{Binding PreloadTotal, Mode=OneWay, PresentationTraceSources.TraceLevel=High}"
-                                 Value="{Binding PreloadCount, Mode=OneWay, PresentationTraceSources.TraceLevel=High}"
+                                 Maximum="{Binding PreloadTotal, Mode=OneWay}"
+                                 Value="{Binding PreloadCount, Mode=OneWay}"
                                  Visibility="{Binding IsPreloading, Converter={StaticResource BoolToVis}}" />
                     <TextBlock Margin="0,2,16,2"
                                Text="{Binding PreloadPercent, StringFormat={}{0:P0}}"
