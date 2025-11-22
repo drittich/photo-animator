@@ -13,8 +13,8 @@ Small Windows utility that scans a folder of JPEG frames and plays them back wit
 ## Keyboard Shortcuts
 | Key | Action |
 | --- | ------- |
-| Space | Play/Pause toggle |
-| Left Arrow | Previous frame |
+| Space | Play/Pause toggle |    
+| Left Arrow | Previous frame |    
 | Right Arrow | Next frame |
 | Home | Rewind to first frame |
 | R | Reload folder (re-scan frames) |
