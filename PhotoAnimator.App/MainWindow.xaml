@@ -6,7 +6,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:PhotoAnimator.App.Controls"
         mc:Ignorable="d"
-        Title="Photo Animator v1.0.1"
+        Title="Photo Animator v1.1.0"
         WindowStartupLocation="CenterScreen"
         MinWidth="900"
         MinHeight="600"

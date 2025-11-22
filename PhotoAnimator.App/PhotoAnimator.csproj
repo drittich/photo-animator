@@ -9,11 +9,13 @@
 		<UseWPF>true</UseWPF>
 		<UseWindowsForms>true</UseWindowsForms>
 		<Title>PhotoAnimator</Title>
-		<Version>1.0.1</Version>
+		<Version>1.1.0</Version>
 		<ApplicationIcon>Assets\photoanim.ico</ApplicationIcon>
 		<Description>A Windows utility that scans a folder of JPEG frames and plays them back with scrubbing and keyboard shortcuts.</Description>
 		<Authors>D'Arcy Rittich</Authors>
 		<Copyright>D'Arcy Rittich</Copyright>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<RepositoryUrl>https://github.com/drittich/photo-animator</RepositoryUrl>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -23,6 +25,13 @@
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
 		<DebugType>embedded</DebugType>
 	</PropertyGroup>
+
+	<ItemGroup>
+	  <None Include="..\..\..\_Experiments\new harmony agent\README.md">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	</ItemGroup>
 
 	<ItemGroup>
 		<Resource Include="Assets\photoanim.ico" />
