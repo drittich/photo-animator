@@ -7,7 +7,6 @@ using System.Windows.Controls;
 using System.ComponentModel;
 using System.Windows.Input;
 using System.Threading;
-using System.Windows.Threading;
 using PhotoAnimator.App.Services;
 using PhotoAnimator.App.ViewModels;
 using PhotoAnimator.App.Controls;
@@ -25,7 +24,7 @@ public partial class MainWindow : Window
     private bool _wasPlayingBeforeScrub;
     private bool _isScrubbing;
     private CancellationTokenSource? _onDemandDecodeCts;
-    private DispatcherTimer? _resizeReloadTimer;
+    private long _latestRenderRequestId;
     private int _lastViewportWidth;
     private int _lastViewportHeight;
 
@@ -77,20 +76,17 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _playbackController.FrameChanged -= OnPlaybackFrameChanged;
-        _onDemandDecodeCts?.Cancel();
-        _onDemandDecodeCts?.Dispose();
+        ResetDecodeCts();
         if (_imageSurface != null)
         {
             _imageSurface.SizeChanged -= OnImageSurfaceSizeChanged;
         }
-        _resizeReloadTimer?.Stop();
-        _resizeReloadTimer = null;
     }
 
     private void OnPlaybackFrameChanged(object? sender, FrameChangedEventArgs args)
     {
         if (args.FrameIndex < 0) return;
-        _ = ShowFrameAsync(args.FrameIndex, cancelPrevious: true);
+        _ = ShowFrameAsync(args.FrameIndex, cancelPrevious: false);
     }
 
     private void OnOpenFolderClick(object sender, RoutedEventArgs e)
@@ -213,6 +209,11 @@ public partial class MainWindow : Window
         {
             AdjustSliderMaximum();
         }
+        else if (e.PropertyName == nameof(MainViewModel.IsPreloading) && _viewModel.IsPreloading)
+        {
+            // Cancel any lingering decodes when a reload begins so old frames do not repopulate the cache.
+            ResetDecodeCts();
+        }
     }
  
     private void AdjustSliderMaximum()
@@ -235,10 +236,7 @@ public partial class MainWindow : Window
 
     private void OnImageSurfaceSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (UpdateViewportFromSurface())
-        {
-            ScheduleViewportReload();
-        }
+        UpdateViewportFromSurface();
     }
 
     private bool UpdateViewportFromSurface()
@@ -267,38 +265,6 @@ public partial class MainWindow : Window
         _lastViewportWidth = pixelWidth;
         _lastViewportHeight = pixelHeight;
         return true;
-    }
-
-    private void ScheduleViewportReload()
-    {
-        if (_viewModel.FolderPath is null || _viewModel.IsPreloading)
-        {
-            return;
-        }
-
-        _resizeReloadTimer ??= new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromMilliseconds(350)
-        };
-        _resizeReloadTimer.Stop();
-        _resizeReloadTimer.Tick -= OnResizeReloadTick;
-        _resizeReloadTimer.Tick += OnResizeReloadTick;
-        _resizeReloadTimer.Start();
-    }
-
-    private async void OnResizeReloadTick(object? sender, EventArgs e)
-    {
-        if (_resizeReloadTimer != null)
-        {
-            _resizeReloadTimer.Stop();
-        }
-
-        if (_viewModel.FolderPath is null || _viewModel.IsPreloading)
-        {
-            return;
-        }
-
-        await _viewModel.ReloadAsync();
     }
 
     private void TogglePlayPause()
@@ -379,6 +345,8 @@ public partial class MainWindow : Window
         if (_imageSurface == null) return Task.CompletedTask;
         if (index < 0 || index >= _viewModel.FrameCount) return Task.CompletedTask;
 
+        long requestId = Interlocked.Increment(ref _latestRenderRequestId);
+
         var cached = _frameCache.GetIfDecoded(index);
         if (cached is BitmapSource bitmapCached)
         {
@@ -386,25 +354,19 @@ public partial class MainWindow : Window
             return Task.CompletedTask;
         }
 
-        if (cancelPrevious)
-        {
-            _onDemandDecodeCts?.Cancel();
-            _onDemandDecodeCts?.Dispose();
-        }
+        var token = GetDecodeToken(cancelPrevious);
+        return FetchAndRenderAsync(index, token, requestId);
 
-        var cts = new CancellationTokenSource();
-        _onDemandDecodeCts = cts;
-
-        return FetchAndRenderAsync(index, cts.Token);
-
-        async Task FetchAndRenderAsync(int frameIndex, CancellationToken token)
+        async Task FetchAndRenderAsync(int frameIndex, CancellationToken token, long request)
         {
             try
             {
                 if (token.IsCancellationRequested) return;
                 var frame = _viewModel.Frames[frameIndex];
                 var decoded = await _frameCache.GetOrDecodeAsync(frame, frameIndex, token).ConfigureAwait(true);
-                if (decoded is BitmapSource bmp && !token.IsCancellationRequested)
+                if (decoded is BitmapSource bmp &&
+                    !token.IsCancellationRequested &&
+                    request == Interlocked.Read(ref _latestRenderRequestId))
                 {
                     _imageSurface.UpdateFrame(bmp);
                 }
@@ -418,5 +380,29 @@ public partial class MainWindow : Window
                 Debug.WriteLine($"[MainWindow] Frame render error at {frameIndex}: {ex.Message}");
             }
         }
+    }
+
+    private CancellationToken GetDecodeToken(bool reset)
+    {
+        if (reset)
+        {
+            ResetDecodeCts();
+        }
+
+        if (_onDemandDecodeCts == null || _onDemandDecodeCts.IsCancellationRequested)
+        {
+            _onDemandDecodeCts?.Dispose();
+            _onDemandDecodeCts = new CancellationTokenSource();
+        }
+
+        return _onDemandDecodeCts.Token;
+    }
+
+    private void ResetDecodeCts()
+    {
+        Interlocked.Increment(ref _latestRenderRequestId);
+        _onDemandDecodeCts?.Cancel();
+        _onDemandDecodeCts?.Dispose();
+        _onDemandDecodeCts = null;
     }
 }

@@ -33,6 +33,7 @@ namespace PhotoAnimator.App.Services
 
         private int _viewportWidth = FallbackViewportWidth;
         private int _viewportHeight = FallbackViewportHeight;
+        private int _generation;
 
         /// <summary>
         /// Legacy constructor preserved for backward compatibility. Uses a no-op scaling strategy and
@@ -89,6 +90,7 @@ namespace PhotoAnimator.App.Services
             if (frames.Count == 0) return;
 
             int targetCount = Math.Min(frames.Count, SoftPreloadLimit);
+            int generation = Volatile.Read(ref _generation);
             int parallel = Math.Max(1, Math.Min(_settings.MaxParallelDecodes, MaxConcurrentDecodeCap));
             bool heavyMode = frames.Count > SoftPreloadLimit;
             if (heavyMode)
@@ -113,6 +115,10 @@ namespace PhotoAnimator.App.Services
                         Debug.WriteLine("[FrameCache] Memory soft cap reached; halting further preload scheduling.");
                         break;
                     }
+                    if (generation != Volatile.Read(ref _generation))
+                    {
+                        break; // Cache was cleared mid-preload; abort scheduling new work.
+                    }
 
                     int frameIndex = i;
                     ct.ThrowIfCancellationRequested();
@@ -131,17 +137,24 @@ namespace PhotoAnimator.App.Services
                                 ReportProgress(ref decodedCount, progress);
                                 return;
                             }
+                            if (generation != Volatile.Read(ref _generation))
+                            {
+                                return; // Cache cleared; drop this decode.
+                            }
                             var fm = frames[frameIndex];
                             var cached = fm.TryGetBitmapCached();
                             if (cached != null)
                             {
-                                _bitmaps.TryAdd(frameIndex, cached);
+                                if (generation == Volatile.Read(ref _generation))
+                                {
+                                    _bitmaps.TryAdd(frameIndex, cached);
+                                }
                                 ReportProgress(ref decodedCount, progress);
                                 return;
                             }
                             var bitmap = await DecodeFrameAsync(fm, frameIndex, ct).ConfigureAwait(false);
 
-                            if (bitmap != null)
+                            if (bitmap != null && generation == Volatile.Read(ref _generation))
                             {
                                 _bitmaps.TryAdd(frameIndex, bitmap);
 
@@ -188,6 +201,7 @@ namespace PhotoAnimator.App.Services
         public async Task<BitmapSource?> GetOrDecodeAsync(FrameMetadata frame, int frameIndex, CancellationToken ct)
         {
             if (frame is null) throw new ArgumentNullException(nameof(frame));
+            int generation = Volatile.Read(ref _generation);
             if (_bitmaps.TryGetValue(frameIndex, out var cached))
             {
                 return cached;
@@ -196,11 +210,11 @@ namespace PhotoAnimator.App.Services
             try
             {
                 var bitmap = await DecodeFrameAsync(frame, frameIndex, ct).ConfigureAwait(false);
-                if (bitmap != null)
+                if (bitmap != null && generation == Volatile.Read(ref _generation))
                 {
                     _bitmaps.TryAdd(frameIndex, bitmap);
                 }
-                return bitmap;
+                return generation == Volatile.Read(ref _generation) ? bitmap : null;
             }
             catch (OperationCanceledException)
             {
@@ -222,7 +236,11 @@ namespace PhotoAnimator.App.Services
         /// <summary>
         /// Clears all cached decoded bitmaps, releasing their memory.
         /// </summary>
-        public void Clear() => _bitmaps.Clear();
+        public void Clear()
+        {
+            _bitmaps.Clear();
+            Interlocked.Increment(ref _generation);
+        }
 
         /// <summary>
         /// Maximum number of frames eagerly preloaded before deferring to lazy decode.
